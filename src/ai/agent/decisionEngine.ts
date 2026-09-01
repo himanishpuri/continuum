@@ -1,5 +1,5 @@
 import type { ConversationMessage } from "@/lib/types";
-import { ai, getGeminiModel } from "../genkit";
+import { ai, fallback, getFallbackModels, getGeminiModel, retry } from "../genkit";
 import { AgentDecisionSchema, type AgentDecision, type IntentClassification } from "../schemas/agentSchemas";
 import { buildContextBlock, type AgentContext } from "./context";
 import { SYSTEM_PROMPT } from "./prompts";
@@ -35,23 +35,11 @@ function fallbackDecision(clarifyingQuestion: string): AgentDecision {
   };
 }
 
-/** Gemini's free tier throws transient 503 (UNAVAILABLE) / 429 under load — retry a few times before falling back. */
-function isTransient(err: unknown): boolean {
-  const code = (err as { code?: number; status?: string })?.code;
-  const status = (err as { status?: string })?.status;
-  return code === 503 || code === 429 || status === "UNAVAILABLE" || status === "RESOURCE_EXHAUSTED";
-}
-
-async function generateWithRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
-  for (let i = 0; ; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (i >= attempts - 1 || !isTransient(err)) throw err;
-      await new Promise((r) => setTimeout(r, 600 * 2 ** i));
-    }
-  }
-}
+// Genkit's `retry` handles transient 503/429/etc. with backoff; `fallback`
+// switches to a lighter model when the primary keeps failing or has been
+// retired (404). Only add `fallback` when there are models to fall back to.
+const fallbackModels = getFallbackModels();
+const generationMiddleware = [retry(), ...(fallbackModels.length ? [fallback({ models: fallbackModels })] : [])];
 
 const INTENT_GUIDANCE: Record<IntentClassification["intent"], string> = {
   simple_query: "This looks like a direct question answerable from the context above. Answer it plainly with proposedAction: null.",
@@ -97,9 +85,13 @@ export async function decide(request: DecisionRequest): Promise<AgentDecision> {
     .join("\n");
 
   const generate = (prompt: string) =>
-    generateWithRetry(() =>
-      ai.generate({ model: getGeminiModel(), system: SYSTEM_PROMPT, prompt, output: { schema: AgentDecisionSchema } })
-    );
+    ai.generate({
+      model: getGeminiModel(),
+      system: SYSTEM_PROMPT,
+      prompt,
+      output: { schema: AgentDecisionSchema },
+      use: generationMiddleware,
+    });
 
   // Returns null if valid (mutating parameters to the parsed form), or a
   // human-readable description of what's wrong with the proposed action.

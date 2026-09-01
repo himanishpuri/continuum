@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@genkit-ai/google-genai": "^1.41.0",
+    "@genkit-ai/middleware": "^0.9.0",
     "@tanstack/react-query": "^5.102.8",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",

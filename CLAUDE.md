@@ -145,8 +145,9 @@ is only ever reached server-side via the Admin SDK.
   `jose@4` (CJS) works everywhere.
 - `GEMINI_MODEL` must be a **concrete** model id (`gemini-3.5-flash`), not the
   `gemini-flash-latest` alias — the alias routes to the newest preview model
-  and 503s under load. `decisionEngine.ts` retries transient 503/429 before
-  falling back.
+  and 503s under load. The decision call uses Genkit's `retry` + `fallback`
+  middleware (registered in `src/ai/genkit.ts`); `fallback` also catches a 404
+  when a pinned model is retired and switches to `GEMINI_FALLBACK_MODELS`.
 
 ## Layout
 

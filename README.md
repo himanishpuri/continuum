@@ -142,6 +142,13 @@ endpoint — the seed data includes an already-due check-in.)
 The `gemini-flash-latest` alias routes to the newest preview model and is
 frequently overloaded (503); pin a real one and bump it deliberately.
 
+The decision call is wrapped with Genkit's `retry` and `fallback`
+middleware (`@genkit-ai/middleware`, registered in `src/ai/genkit.ts`):
+transient 503/429s are retried with backoff, and if `GEMINI_MODEL` keeps
+failing or has been retired (404) it falls back to
+`GEMINI_FALLBACK_MODELS` (default `gemini-flash-lite-latest`). Set that
+var to an empty string to disable fallback.
+
 ## Enabling Firebase
 
 1. Create a Firebase project and a Web App inside it.
