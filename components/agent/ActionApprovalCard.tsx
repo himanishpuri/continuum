@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -19,8 +20,23 @@ export interface ActionCardData {
 
 const RISK_TONE: Record<string, BadgeTone> = { low: "neutral", medium: "warning", high: "danger", prohibited: "danger" };
 
+/** How a non-pending status reads once the proposal is resolved. */
+function resolvedLabel(status: string): { text: string; muted: boolean } {
+  switch (status) {
+    case "REJECTED":
+      return { text: "Not applied", muted: true };
+    case "EXPIRED":
+      return { text: "Expired — ask the agent again", muted: true };
+    case "FAILED":
+      return { text: "Couldn't apply", muted: true };
+    default:
+      return { text: "✓ Applied", muted: false }; // APPROVED / EXECUTING / COMPLETED
+  }
+}
+
 /** The [Approve] [Reject] proposal card from §8/§9/§21. */
 export function ActionApprovalCard({ data }: { data: ActionCardData }) {
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState(data.status);
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +47,9 @@ export function ActionApprovalCard({ data }: { data: ActionCardData }) {
     try {
       const res = await api.post<{ action: { status: string } }>(`/api/actions/${data.actionId}/${kind}`);
       setStatus(res.action.status);
+      for (const key of ["dashboard", "plans", "progress"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -39,6 +58,7 @@ export function ActionApprovalCard({ data }: { data: ActionCardData }) {
   }
 
   const resolved = status !== "PENDING_APPROVAL";
+  const resolvedText = resolvedLabel(status);
 
   return (
     <div className="mt-2 w-full max-w-sm rounded-xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-950/40">
@@ -68,8 +88,8 @@ export function ActionApprovalCard({ data }: { data: ActionCardData }) {
           </Button>
         </div>
       ) : (
-        <p className={clsx("mt-3 text-sm font-medium", status === "REJECTED" ? "text-slate-500 dark:text-slate-400" : "text-emerald-700 dark:text-emerald-400")}>
-          {status === "REJECTED" ? "Not applied" : "✓ Applied"}
+        <p className={clsx("mt-3 text-sm font-medium", resolvedText.muted ? "text-slate-500 dark:text-slate-400" : "text-emerald-700 dark:text-emerald-400")}>
+          {resolvedText.text}
         </p>
       )}
       {error && <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{error}</p>}

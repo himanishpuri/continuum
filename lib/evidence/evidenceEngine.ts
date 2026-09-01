@@ -47,7 +47,7 @@ export function buildEvidence(
     id: "weekly_completion",
     type: "adherence_stat",
     label: "This week",
-    value: `${snapshot.weeklyCompleted} of ${snapshot.weeklyPlanned} sessions (${Math.round(snapshot.weeklyCompletionRate * 100)}%)`,
+    value: `${snapshot.weeklyCompleted} completed, ${snapshot.weeklyMissed} missed (${snapshot.weeklyPlanned} scheduled)`,
     source: "events",
     timestamp,
   });

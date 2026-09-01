@@ -122,6 +122,7 @@ export function describeToolCatalog(): string {
     "- daysOfWeek: integer array, 0=Sunday … 6=Saturday (e.g. Mon/Wed/Fri = [1,3,5]).",
     "- time: 24-hour \"HH:MM\" (e.g. 6:00 PM = \"18:00\").",
     "- durationMinutes: a positive integer; if the user gives a distance or open-ended goal, pick a reasonable session length and say so in the summary.",
+    "- timestamp (RECORD_EVENT): ISO 8601 datetime of when the session actually happened, resolved against CURRENT DATE & TIME above. A bare past weekday (\"on Wednesday\") = its most recent occurrence on or before today; \"yesterday\" / \"this morning\" likewise. Best-guess it and name the date you used in your summary. Omit it only when the session is happening right now.",
     "- Fill EVERY required parameter when proposing an action. Infer sensible values for anything the user didn't state rather than omitting it.",
   ].join("\n");
 }

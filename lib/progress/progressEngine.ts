@@ -25,19 +25,36 @@ function toSessionEvents(events: EventRecord[]): SessionEvent[] {
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
+/** yyyy-MM-dd -> every session logged that day (a day can have several). */
+function groupByDate(sessions: SessionEvent[]): Map<string, SessionEvent[]> {
+  const byDate = new Map<string, SessionEvent[]>();
+  for (const s of sessions) {
+    const list = byDate.get(s.date);
+    if (list) list.push(s);
+    else byDate.set(s.date, [s]);
+  }
+  return byDate;
+}
+
+function dayHasCompleted(day: SessionEvent[] | undefined): boolean {
+  return Boolean(day?.some((s) => s.status === "completed"));
+}
+
 function computeStreak(sessions: SessionEvent[], plan: Plan | null, today: Date): number {
-  const byDate = new Map(sessions.map((s) => [s.date, s]));
+  const byDate = groupByDate(sessions);
   const todayKey = dateKey(today);
   let streak = 0;
   for (let i = 0; i < 60; i++) {
     const day = subDays(today, i);
     const key = dateKey(day);
-    const session = byDate.get(key);
-    if (session?.status === "completed") {
+    const daySessions = byDate.get(key);
+    if (dayHasCompleted(daySessions)) {
       streak += 1;
       continue;
     }
-    if (session?.status === "missed") break;
+    // A day with only misses breaks the streak; a completed session that day
+    // would already have been caught above.
+    if (daySessions && daySessions.length > 0) break;
     const isScheduledDay = plan ? plan.schedule.daysOfWeek.includes(day.getDay()) : false;
     if (isScheduledDay && key !== todayKey) break;
     // Unscheduled rest day, or today's session hasn't happened yet: skip.
@@ -73,16 +90,21 @@ function computeCompletionByDuration(sessions: SessionEvent[]) {
 }
 
 function computeTimeline(sessions: SessionEvent[], today: Date): DayOutcome[] {
-  const byDate = new Map(sessions.map((s) => [s.date, s]));
+  const byDate = groupByDate(sessions);
   const days: DayOutcome[] = [];
   for (let i = 6; i >= 0; i--) {
     const day = subDays(today, i);
     const key = dateKey(day);
-    const session = byDate.get(key);
+    const daySessions = byDate.get(key) ?? [];
+    const completed = daySessions.filter((s) => s.status === "completed");
+    const missedCount = daySessions.length - completed.length;
+    const completedMinutes = completed.reduce((sum, s) => sum + s.durationMinutes, 0);
     days.push({
       date: key,
-      status: session?.status ?? "no_session",
-      durationMinutes: session?.durationMinutes ?? null,
+      status: completed.length > 0 ? "completed" : missedCount > 0 ? "missed" : "no_session",
+      durationMinutes: completedMinutes || null,
+      completedCount: completed.length,
+      missedCount,
     });
   }
   return days;
@@ -103,8 +125,10 @@ export function computeProgressSnapshot(events: EventRecord[], plan: Plan | null
   const todayKey = dateKey(today);
   const last7 = sessions.filter((s) => s.date >= last7StartKey && s.date <= todayKey);
   const weeklyCompleted = last7.filter((s) => s.status === "completed").length;
+  const weeklyMissed = last7.length - weeklyCompleted;
   const weeklyPlanned = plan ? countScheduledDays(plan, subDays(today, 6), today) : last7.length;
-  const weeklyCompletionRate = weeklyPlanned > 0 ? weeklyCompleted / weeklyPlanned : 0;
+  const weeklyLogged = weeklyCompleted + weeklyMissed;
+  const weeklyCompletionRate = weeklyLogged > 0 ? weeklyCompleted / weeklyLogged : 0;
 
   const completedInWindow = inWindow.filter((s) => s.status === "completed");
   const averageDurationMinutes =
@@ -128,6 +152,7 @@ export function computeProgressSnapshot(events: EventRecord[], plan: Plan | null
     streakDays: computeStreak(sessions, plan, today),
     weeklyPlanned,
     weeklyCompleted,
+    weeklyMissed,
     weeklyCompletionRate,
     averageDurationMinutes,
     trend,

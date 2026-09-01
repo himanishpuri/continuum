@@ -66,7 +66,11 @@ export default function DashboardPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <PlanCard plan={data.plan} compact />
           <StatCard label="Current streak" value={`${data.progress.streakDays} day${data.progress.streakDays === 1 ? "" : "s"}`} />
-          <StatCard label="Weekly completion" value={`${Math.round(data.progress.weeklyCompletionRate * 100)}%`} hint={`${data.progress.weeklyCompleted} of ${data.progress.weeklyPlanned} sessions`} />
+          <StatCard
+            label="This week"
+            value={`${data.progress.weeklyCompleted} completed`}
+            hint={`${data.progress.weeklyMissed} missed · ${data.progress.weeklyPlanned} scheduled`}
+          />
           <StatCard
             label="Next check-in"
             value={data.nextCheckin ? new Date(data.nextCheckin.scheduledAt).toLocaleDateString(undefined, { weekday: "long" }) : "None scheduled"}

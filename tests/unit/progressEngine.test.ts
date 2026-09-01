@@ -66,4 +66,25 @@ describe("progressEngine", () => {
     expect(snapshot.streakDays).toBe(0);
     expect(snapshot.completionByDuration).toHaveLength(0);
   });
+
+  it("keeps every session when a day has several, instead of showing only one", () => {
+    const now = new Date("2026-06-15T12:00:00Z");
+    const plan = everydayPlan(now);
+    const events: EventRecord[] = [
+      sessionEvent(now, 0, "SESSION_COMPLETED", 40),
+      sessionEvent(now, 0, "SESSION_COMPLETED", 35),
+      sessionEvent(now, 0, "SESSION_MISSED", 45),
+    ];
+    const snapshot = computeProgressSnapshot(events, plan, now);
+    const today = snapshot.timeline.at(-1)!;
+
+    expect(today.completedCount).toBe(2);
+    expect(today.missedCount).toBe(1);
+    expect(today.status).toBe("completed"); // a completed session isn't hidden by a same-day miss
+    expect(today.durationMinutes).toBe(75); // 40 + 35
+    expect(snapshot.streakDays).toBe(1); // the day counts as completed for the streak
+    expect(snapshot.weeklyCompleted).toBe(2);
+    expect(snapshot.weeklyMissed).toBe(1);
+    expect(snapshot.weeklyCompletionRate).toBeCloseTo(2 / 3, 2); // completed / (completed + missed)
+  });
 });

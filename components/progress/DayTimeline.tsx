@@ -8,6 +8,16 @@ const STATUS_CONFIG = {
   no_session: { icon: Circle, label: "No session", className: "text-slate-300 dark:text-slate-600" },
 } as const;
 
+/** "Completed", or "2 completed · 1 missed" when the day had more than one session. */
+function dayLabel(day: DayOutcome): string {
+  const total = day.completedCount + day.missedCount;
+  if (total <= 1) return STATUS_CONFIG[day.status].label;
+  const parts: string[] = [];
+  if (day.completedCount > 0) parts.push(`${day.completedCount} completed`);
+  if (day.missedCount > 0) parts.push(`${day.missedCount} missed`);
+  return parts.join(" · ");
+}
+
 export function DayTimeline({ days }: { days: DayOutcome[] }) {
   return (
     <ol className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -21,7 +31,7 @@ export function DayTimeline({ days }: { days: DayOutcome[] }) {
             </span>
             <span className={`flex items-center gap-1.5 ${config.className}`}>
               <Icon className="h-4 w-4" aria-hidden />
-              {config.label}
+              {dayLabel(day)}
               {day.durationMinutes ? ` · ${day.durationMinutes} min` : ""}
             </span>
           </li>

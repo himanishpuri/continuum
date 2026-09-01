@@ -10,6 +10,8 @@ export interface AgentContext {
   plan: Plan | null;
   progress: ProgressSnapshot;
   evidence: Evidence[];
+  /** ISO instant this context was assembled — the model's reference for resolving "yesterday", "on Wednesday", etc. */
+  now: string;
   /** Human-readable labels for work already done while assembling this context — surfaced in the Agent Run UI (§9). */
   retrievedSteps: string[];
 }
@@ -31,8 +33,9 @@ export async function buildAgentContext(userId: string): Promise<AgentContext> {
     repos.events.list(userId, { types: ["SESSION_COMPLETED", "SESSION_MISSED"], limit: 200 }),
   ]);
 
-  const progress = computeProgressSnapshot(events, plan, new Date());
-  const evidence = buildEvidence(progress, plan, user.preferences, new Date());
+  const now = new Date();
+  const progress = computeProgressSnapshot(events, plan, now);
+  const evidence = buildEvidence(progress, plan, user.preferences, now);
 
   return {
     user,
@@ -40,6 +43,7 @@ export async function buildAgentContext(userId: string): Promise<AgentContext> {
     plan,
     progress,
     evidence,
+    now: now.toISOString(),
     retrievedSteps: [
       "Retrieved relevant history",
       plan ? "Reviewed your current plan" : "Checked for an existing plan (none found)",
@@ -56,7 +60,7 @@ export function summarizePlan(plan: Plan | null): string {
 export function summarizeProgress(progress: ProgressSnapshot): string {
   const lines = [
     `Completion rate (last 30 days): ${Math.round(progress.completionRate * 100)}%`,
-    `This week: ${progress.weeklyCompleted}/${progress.weeklyPlanned} (${Math.round(progress.weeklyCompletionRate * 100)}%)`,
+    `This week: ${progress.weeklyCompleted} completed, ${progress.weeklyMissed} missed (${progress.weeklyPlanned} scheduled plan-day${progress.weeklyPlanned === 1 ? "" : "s"})`,
     `Current streak: ${progress.streakDays} day(s)`,
     `Trend: ${progress.trend}`,
     `Average session length: ${progress.averageDurationMinutes} min`,
@@ -73,7 +77,12 @@ export function summarizeEvidence(evidence: Evidence[]): string {
 }
 
 export function buildContextBlock(context: AgentContext): string {
+  const now = new Date(context.now);
+  const nowLine = `${context.now} (${now.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" })}, UTC)`;
   return [
+    `CURRENT DATE & TIME: ${nowLine}`,
+    `Resolve any relative date the user mentions ("yesterday", "this morning", "on Wednesday") against this.`,
+    ``,
     `USER PROFILE`,
     `Name: ${context.user.profile.name}`,
     `Timezone: ${context.user.profile.timezone}`,

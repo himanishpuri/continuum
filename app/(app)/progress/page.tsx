@@ -65,9 +65,11 @@ export default function ProgressPage() {
         <Card>
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">This week</p>
           <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">
-            {progress.weeklyCompleted}/{progress.weeklyPlanned}
+            {progress.weeklyCompleted} completed
           </p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{Math.round(progress.weeklyCompletionRate * 100)}% completion</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {progress.weeklyMissed} missed · {progress.weeklyPlanned} scheduled
+          </p>
         </Card>
         <Card>
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Streak</p>

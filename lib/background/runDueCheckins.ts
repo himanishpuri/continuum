@@ -65,8 +65,11 @@ async function evaluateCheckin(
   const repos = getRepositories();
   const now = new Date();
 
-  const severelyOff = Boolean(plan) && progress.weeklyPlanned >= 3 && progress.weeklyCompletionRate < 0.4;
-  const mildDip = Boolean(plan) && !severelyOff && progress.weeklyCompletionRate < 0.7;
+  // Severity is adherence vs. the schedule (completed / scheduled plan-days),
+  // not the display rate (completed / logged), so this stays stable.
+  const weeklyAdherence = progress.weeklyPlanned > 0 ? progress.weeklyCompleted / progress.weeklyPlanned : 1;
+  const severelyOff = Boolean(plan) && progress.weeklyPlanned >= 3 && weeklyAdherence < 0.4;
+  const mildDip = Boolean(plan) && !severelyOff && weeklyAdherence < 0.7;
 
   let message: string;
   let outcome: CheckinRunResult["outcome"];
@@ -94,12 +97,12 @@ async function evaluateCheckin(
     });
   } else if (mildDip) {
     outcome = "no_action_needed";
-    message = `One or two sessions were missed, but overall adherence is holding up (${Math.round(progress.weeklyCompletionRate * 100)}% this week). No plan change needed — keep going.`;
+    message = `You've done ${progress.weeklyCompleted} of ${progress.weeklyPlanned} scheduled sessions this week. A little behind, but nothing that needs a plan change — keep going.`;
     steps.push("Adherence dipped slightly but remains within a normal range");
   } else {
     outcome = "no_action_needed";
     message = plan
-      ? `Adherence looks strong (${Math.round(progress.weeklyCompletionRate * 100)}% this week). No changes needed.`
+      ? `You've done ${progress.weeklyCompleted} of ${progress.weeklyPlanned} scheduled sessions this week. Adherence looks strong — no changes needed.`
       : "No active plan to check in on yet.";
     steps.push("Adherence remains strong");
   }

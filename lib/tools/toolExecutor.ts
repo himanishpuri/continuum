@@ -282,6 +282,16 @@ async function executeDeleteMemory(userId: string, action: AgentAction): Promise
   };
 }
 
+/** Accept the model's session timestamp only if it parses and isn't in the future; otherwise fall back to now. */
+function resolveSessionTimestamp(raw: string | undefined): string {
+  const now = Date.now();
+  if (raw) {
+    const parsed = Date.parse(raw);
+    if (!Number.isNaN(parsed) && parsed <= now + 60_000) return new Date(parsed).toISOString();
+  }
+  return new Date(now).toISOString();
+}
+
 async function executeRecordEvent(userId: string, action: AgentAction): Promise<ExecutionResult> {
   const p = action.parameters as {
     eventType: "SESSION_COMPLETED" | "SESSION_MISSED";
@@ -290,12 +300,13 @@ async function executeRecordEvent(userId: string, action: AgentAction): Promise<
     summary: string;
   };
   if (!p.eventType || !p.summary) throw new Error("RECORD_EVENT requires eventType and summary.");
+  const timestamp = resolveSessionTimestamp(p.timestamp);
   return {
-    result: { recordedType: p.eventType, timestamp: p.timestamp ?? new Date().toISOString() },
+    result: { recordedType: p.eventType, timestamp },
     eventType: p.eventType,
     eventSummary: p.summary,
     eventPayload: { durationMinutes: p.durationMinutes ?? null, reportedVia: "agent" },
-    eventTimestamp: p.timestamp,
+    eventTimestamp: timestamp,
   };
 }
 

@@ -310,15 +310,18 @@ export interface Evidence {
 export interface DayOutcome {
   date: string; // ISO date, yyyy-MM-dd
   status: "completed" | "missed" | "scheduled" | "no_session";
-  durationMinutes: number | null;
+  durationMinutes: number | null; // total minutes of completed sessions that day
+  completedCount: number;
+  missedCount: number;
 }
 
 export interface ProgressSnapshot {
   completionRate: number; // 0..1 over the window
   streakDays: number;
-  weeklyPlanned: number;
+  weeklyPlanned: number; // scheduled plan-days in the trailing 7 days
   weeklyCompleted: number;
-  weeklyCompletionRate: number;
+  weeklyMissed: number;
+  weeklyCompletionRate: number; // completed / (completed + missed), 0 when none logged
   averageDurationMinutes: number;
   trend: "improving" | "declining" | "stable";
   completionByDuration: { durationMinutes: number; completionRate: number; sampleSize: number }[];
