@@ -1,0 +1,36 @@
+import { NextResponse } from "next/server";
+import { z } from "genkit";
+import { requireApiUser } from "@/lib/auth/apiAuth";
+import { getRepositories } from "@/lib/repositories";
+
+const BodySchema = z.object({
+  type: z.enum(["SESSION_COMPLETED", "SESSION_MISSED"]),
+  durationMinutes: z.number().positive().optional(),
+  timestamp: z.string().optional(),
+  summary: z.string().optional(),
+});
+
+/**
+ * Direct, user-authenticated logging of a session outcome (e.g. a "mark
+ * today complete/missed" control on the Progress page) — allowed
+ * unconditionally per the policy table (§20 RECORD_EVENT), so this writes
+ * straight to the event log rather than going through action approval.
+ */
+export async function POST(request: Request) {
+  const auth = await requireApiUser();
+  if ("response" in auth) return auth.response;
+
+  const parsed = BodySchema.safeParse(await request.json().catch(() => ({})));
+  if (!parsed.success) return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+
+  const { type, durationMinutes, timestamp, summary } = parsed.data;
+  const event = await getRepositories().events.create(auth.user.uid, {
+    type,
+    timestamp: timestamp ?? new Date().toISOString(),
+    source: "user",
+    payload: { durationMinutes: durationMinutes ?? null, reportedVia: "manual" },
+    summary: summary ?? (type === "SESSION_COMPLETED" ? "Session marked complete." : "Session marked missed."),
+  });
+
+  return NextResponse.json({ event });
+}
