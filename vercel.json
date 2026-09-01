@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    { "path": "/api/cron/run-due-checkins", "schedule": "0 8 * * *" }
+  ],
+  "functions": {
+    "app/api/cron/run-due-checkins/route.ts": { "maxDuration": 60 }
+  }
+}

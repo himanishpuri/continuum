@@ -1,9 +1,12 @@
 import type { AgentContext } from "@/src/ai/agent/context";
 import type { AgentDecision, IntentClassification } from "@/src/ai/schemas/agentSchemas";
+import type { ConversationMessage } from "@/lib/types";
 
 export interface AgentTurnInput {
   userId: string;
   message: string;
+  /** Prior turns in this conversation, oldest first, excluding the current message. */
+  history: ConversationMessage[];
   context: AgentContext;
   intent: IntentClassification;
 }

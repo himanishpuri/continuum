@@ -12,8 +12,13 @@ export const ai = genkit({
   plugins: [googleAI()],
 });
 
-/** GEMINI_MODEL defaults to a floating alias so the app doesn't pin to a model that eventually goes stale. */
+/**
+ * GEMINI_MODEL should be a concrete, currently-served model id. The
+ * `gemini-flash-latest` floating alias sounds nice but routes to whatever
+ * preview model is newest, which is frequently overloaded (503) — pin a
+ * real one and bump it deliberately.
+ */
 export function getGeminiModel() {
-  const modelId = process.env.GEMINI_MODEL || "gemini-flash-latest";
+  const modelId = process.env.GEMINI_MODEL || "gemini-3.5-flash";
   return googleAI.model(modelId);
 }

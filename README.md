@@ -123,15 +123,15 @@ endpoint — the seed data includes an already-due check-in.)
    ```
    DEMO_MODE=false
    GEMINI_API_KEY=your-key
-   GEMINI_MODEL=gemini-flash-latest   # or a specific model id
+   GEMINI_MODEL=gemini-3.5-flash   # a concrete, currently-served model id
    ```
 3. `GeminiAgentProvider` (backed by Genkit + `@genkit-ai/google-genai`)
    activates automatically — see `src/ai/genkit.ts` and
    `src/ai/agent/decisionEngine.ts`.
 
-`GEMINI_MODEL` defaults to the floating alias `gemini-flash-latest` so the
-app doesn't pin to a model that eventually goes stale; set it to a
-specific model id if you need a fixed version.
+`GEMINI_MODEL` should be a concrete model id (default `gemini-3.5-flash`).
+The `gemini-flash-latest` alias routes to the newest preview model and is
+frequently overloaded (503); pin a real one and bump it deliberately.
 
 ## Enabling Firebase
 
@@ -179,19 +179,81 @@ Covers (see `tests/unit` and `tests/integration`):
 - **Auth isolation** — the repository layer never returns or mutates
   another user's data.
 
-## Deployment (Cloud Run)
+## Deployment
+
+Two supported targets. Both use the same Firestore + Firebase Auth setup
+(Firestore free tier — no GCP billing needed for the database itself; run
+`gcloud firestore databases create --location=<region>` then
+`firebase deploy --only firestore:rules,firestore:indexes`, and enable
+**Google** + **Email/Password** providers in Firebase Auth).
+
+### Deploy to Vercel (no GCP billing)
+
+Next.js runs natively; `firebase-admin`, Firestore and Firebase Auth work
+unchanged. The background job runs as a **Vercel Cron** hitting
+`GET /api/cron/run-due-checkins` (secured by the `CRON_SECRET` env var,
+which Vercel sends as `Authorization: Bearer`). On the Hobby plan cron is
+limited to **once per day** — `vercel.json` schedules it at 08:00 UTC.
 
 ```bash
-# Build & push
-gcloud builds submit --tag gcr.io/PROJECT_ID/continuum
+npx vercel login
+npx vercel link            # create/link the project
+npm run vercel:env         # scripts/vercel-env.sh — pushes .env / .env.local to Vercel
+npx vercel --prod
+```
 
-# Deploy
+Then add `<your-project>.vercel.app` to Firebase Auth → **Authorized
+domains**, and `curl https://<your-project>.vercel.app/api/health`.
+
+### Deploy to Cloud Run
+
+Prerequisites: `gcloud` authenticated, **billing enabled** on the project,
+Firestore created (`gcloud firestore databases create --location=<region>`),
+`firebase deploy --only firestore:rules,firestore:indexes` run, and:
+
+```bash
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com secretmanager.googleapis.com \
+  cloudscheduler.googleapis.com firestore.googleapis.com identitytoolkit.googleapis.com
+```
+
+Then, with all values filled into `.env` / `.env.local` (including real
+`SESSION_SECRET` / `CRON_SECRET` — `openssl rand -base64 32`):
+
+```bash
+npm run deploy   # scripts/deploy.sh — see below
+```
+
+`scripts/deploy.sh` creates the Artifact Registry repo, syncs the
+`gemini-api-key` / `firebase-private-key` secrets from your env and grants
+the runtime service account access, builds + pushes the image via Cloud
+Build, and deploys the Cloud Run service. It then prints the follow-up
+steps (add the service host to Firebase **Authorized domains**; run
+`npm run setup:scheduler`).
+
+**Why a build step for the client config:** Next.js inlines
+`NEXT_PUBLIC_FIREBASE_*` into the browser bundle at build time, so those
+six values (the public Firebase Web App config — not secrets) are passed
+as Docker `--build-arg`s via `cloudbuild.yaml`. Passing them only to
+`gcloud run deploy` is too late and Google/email sign-in never
+initializes. Everything server-side (`DEMO_MODE`, Firebase Admin, Gemini,
+`SESSION_SECRET`, `CRON_SECRET`) is read from the Cloud Run runtime env.
+
+Doing it by hand instead of the script:
+
+```bash
+gcloud artifacts repositories create continuum --repository-format=docker --location=<region>
+
+gcloud builds submit --config cloudbuild.yaml --substitutions \
+_IMAGE=<region>-docker.pkg.dev/<PROJECT_ID>/continuum/continuum:latest,\
+_NEXT_PUBLIC_FIREBASE_API_KEY=...,_NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...,\
+_NEXT_PUBLIC_FIREBASE_PROJECT_ID=...,_NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=...,\
+_NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...,_NEXT_PUBLIC_FIREBASE_APP_ID=...
+
 gcloud run deploy continuum \
-  --image gcr.io/PROJECT_ID/continuum \
-  --platform managed \
-  --region YOUR_REGION \
-  --allow-unauthenticated \
-  --set-env-vars DEMO_MODE=false,GEMINI_MODEL=gemini-flash-latest \
+  --image <region>-docker.pkg.dev/<PROJECT_ID>/continuum/continuum:latest \
+  --region <region> --allow-unauthenticated \
+  --set-env-vars DEMO_MODE=false,GEMINI_MODEL=gemini-3.5-flash \
   --set-env-vars FIREBASE_PROJECT_ID=...,FIREBASE_CLIENT_EMAIL=... \
   --set-env-vars SESSION_SECRET=...,CRON_SECRET=... \
   --set-secrets GEMINI_API_KEY=gemini-api-key:latest,FIREBASE_PRIVATE_KEY=firebase-private-key:latest

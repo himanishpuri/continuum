@@ -12,8 +12,28 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-# Build-time env vars are not required — DEMO_MODE/Firebase/Gemini config
-# is read at request time from the Cloud Run service's runtime env vars.
+
+# Server-side config (DEMO_MODE, Firebase Admin, Gemini, secrets) is read at
+# request time from the Cloud Run env — nothing to bake in here.
+#
+# The NEXT_PUBLIC_FIREBASE_* values are the exception: Next.js inlines them
+# into the client bundle at build time, so real browser sign-in needs them
+# passed as --build-arg. They are the public Firebase Web App config (safe to
+# expose / bake into the image), NOT secrets. Left empty, the build still
+# succeeds and the app runs demo-only.
+ARG NEXT_PUBLIC_FIREBASE_API_KEY=""
+ARG NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=""
+ARG NEXT_PUBLIC_FIREBASE_PROJECT_ID=""
+ARG NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=""
+ARG NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=""
+ARG NEXT_PUBLIC_FIREBASE_APP_ID=""
+ENV NEXT_PUBLIC_FIREBASE_API_KEY=$NEXT_PUBLIC_FIREBASE_API_KEY \
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=$NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN \
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID=$NEXT_PUBLIC_FIREBASE_PROJECT_ID \
+    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=$NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET \
+    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=$NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID \
+    NEXT_PUBLIC_FIREBASE_APP_ID=$NEXT_PUBLIC_FIREBASE_APP_ID
+
 RUN npm run build
 
 # --- runner: minimal non-root production image ---

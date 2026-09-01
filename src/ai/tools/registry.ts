@@ -92,3 +92,36 @@ export const TOOL_REGISTRY: ToolMetadata[] = [
 export function findToolByActionType(actionType: ActionType): ToolMetadata | undefined {
   return TOOL_REGISTRY.find((t) => t.actionType === actionType);
 }
+
+function fieldNames(schema: z.ZodTypeAny): { required: string[]; optional: string[] } {
+  const shape = (schema as z.ZodObject<z.ZodRawShape>).shape ?? {};
+  const required: string[] = [];
+  const optional: string[] = [];
+  for (const [key, value] of Object.entries(shape)) {
+    ((value as z.ZodTypeAny).isOptional() ? optional : required).push(key);
+  }
+  return { required, optional };
+}
+
+/**
+ * Rendered into the decision prompt so the model knows the exact parameter
+ * contract for each action it can propose — without this it fills
+ * `proposedAction.parameters` blind and the schema check downstream
+ * silently drops the proposal.
+ */
+export function describeToolCatalog(): string {
+  const lines = TOOL_REGISTRY.map((t) => {
+    const { required, optional } = fieldNames(t.inputSchema);
+    const params = [...required.map((f) => f), ...optional.map((f) => `${f}?`)].join(", ");
+    return `- ${t.actionType}: ${t.description}\n  parameters: { ${params} }`;
+  });
+  return [
+    lines.join("\n"),
+    "",
+    "Parameter conventions:",
+    "- daysOfWeek: integer array, 0=Sunday … 6=Saturday (e.g. Mon/Wed/Fri = [1,3,5]).",
+    "- time: 24-hour \"HH:MM\" (e.g. 6:00 PM = \"18:00\").",
+    "- durationMinutes: a positive integer; if the user gives a distance or open-ended goal, pick a reasonable session length and say so in the summary.",
+    "- Fill EVERY required parameter when proposing an action. Infer sensible values for anything the user didn't state rather than omitting it.",
+  ].join("\n");
+}

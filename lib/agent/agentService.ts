@@ -82,6 +82,10 @@ export async function sendAgentMessage(userId: string, message: string, conversa
     : await repos.conversations.create(userId, { title: message.slice(0, 60), createdAt: startedAt, updatedAt: startedAt });
   if (!conversation) throw new Error("Conversation not found.");
 
+  // Prior turns, captured before this message is appended, so the provider
+  // can reason with the full thread instead of the latest line in isolation.
+  const history = conversationId ? await repos.conversations.listMessages(userId, conversation.id) : [];
+
   await repos.conversations.addMessage(userId, conversation.id, {
     role: "user",
     content: message,
@@ -135,7 +139,7 @@ export async function sendAgentMessage(userId: string, message: string, conversa
   try {
     const context = await buildAgentContext(userId);
     const intent = classifyIntent(message);
-    const turn = await provider.handleMessage({ userId, message, context, intent });
+    const turn = await provider.handleMessage({ userId, message, history, context, intent });
     const decision = turn.decision;
 
     const steps: AgentRunStep[] = [

@@ -1,3 +1,4 @@
+import type { ConversationMessage } from "@/lib/types";
 import type { AgentDecision, IntentClassification } from "../schemas/agentSchemas";
 import type { AgentContext } from "./context";
 import { decide } from "./decisionEngine";
@@ -12,8 +13,9 @@ import { decide } from "./decisionEngine";
  */
 export async function runContinuumAgentFlow(
   message: string,
+  history: ConversationMessage[],
   context: AgentContext,
   intent: IntentClassification
 ): Promise<AgentDecision> {
-  return decide({ message, context, intent });
+  return decide({ message, history, context, intent });
 }

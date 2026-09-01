@@ -26,7 +26,7 @@ function defaultUserRecord(uid: string, opts?: { name?: string; email?: string |
         canScheduleFollowups: true,
         requireApprovalForExternalActions: true,
       },
-      geminiModel: process.env.GEMINI_MODEL || "gemini-flash-latest",
+      geminiModel: process.env.GEMINI_MODEL || "gemini-3.5-flash",
     },
   };
 }
