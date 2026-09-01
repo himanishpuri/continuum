@@ -9,10 +9,19 @@ habit formation, and reflection.
 Continuum is deliberately not "ChatGPT with a database." It is built to
 make the difference between a chatbot and an agent visible:
 
-```
-CHATBOT:    user -> question -> answer
-CONTINUUM:  user -> goal -> understand -> retrieve memory -> reason
-                 -> plan -> act -> observe -> remember -> follow up -> adapt
+```mermaid
+flowchart LR
+    subgraph Chatbot
+        direction LR
+        q[question] --> a[answer]
+    end
+    subgraph Continuum
+        direction LR
+        g[goal] --> u[understand] --> mem["recall history & memory"] --> rs[reason]
+        rs --> pr[propose] --> ok[you approve] --> act[act for real]
+        act --> wm[remember] --> fu[follow up] --> ad[adapt]
+        ad -.-> rs
+    end
 ```
 
 ## Product overview
@@ -348,10 +357,20 @@ interfaces both backends implement identically.
 
 ## Agent lifecycle
 
-RECEIVE → CLASSIFY → RETRIEVE_CONTEXT → REASON → PLAN → VALIDATE → (ASK |
-WAIT_FOR_APPROVAL) → EXECUTE → VERIFY → WRITE_MEMORY → RESPOND — see
-`docs/architecture.md` for the full diagram and `lib/agent/agentService.ts`
-for the implementation. Classification is a deterministic keyword check
+```mermaid
+flowchart LR
+    RECEIVE --> CLASSIFY --> RETRIEVE_CONTEXT
+    RETRIEVE_CONTEXT -->|simple question| RESPOND
+    RETRIEVE_CONTEXT -->|needs reasoning| REASON --> PLAN --> VALIDATE
+    VALIDATE -->|missing info| ASK --> RESPOND
+    VALIDATE -->|needs approval| WAIT_FOR_APPROVAL --> EXECUTE
+    VALIDATE -->|allowed now| EXECUTE
+    EXECUTE --> VERIFY --> WRITE_MEMORY --> RESPOND
+```
+
+See `docs/architecture.md` for the full diagram set (it is all Mermaid)
+and `lib/agent/agentService.ts` for the implementation. Classification is
+a deterministic keyword check
 (`src/ai/agent/planner.ts`), not a second model call — Gemini is called at
 most once per user message (`src/ai/agent/decisionEngine.ts`), with a
 single structured (`AgentDecisionSchema`) response covering intent,
