@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "rimraf .demo-data-test && vitest run",
     "test:watch": "vitest",
-    "seed": "tsx scripts/seed-demo.ts"
+    "seed": "tsx scripts/seed-demo.ts",
+    "setup:scheduler": "bash scripts/setup-cloud-scheduler.sh"
   },
   "dependencies": {
     "@genkit-ai/google-genai": "^1.41.0",

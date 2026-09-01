@@ -203,9 +203,47 @@ this), with a `HEALTHCHECK` against `GET /api/health`.
 
 ### Background check-ins in production
 
-Create a Cloud Scheduler job that POSTs to
-`https://<your-service>/api/cron/run-due-checkins` with header
-`X-Cron-Secret: <CRON_SECRET>`, on whatever cadence fits (e.g. hourly).
+Once the Cloud Run service is deployed with a `CRON_SECRET` set, provision
+the Cloud Scheduler job that drives it with:
+
+```bash
+npm run setup:scheduler -- --secret=<CRON_SECRET>
+```
+
+This runs `scripts/setup-cloud-scheduler.sh`, which creates (or updates,
+idempotently) an HTTP job that POSTs to
+`<service-url>/api/cron/run-due-checkins` with header
+`X-Cron-Secret: <CRON_SECRET>` on an hourly schedule by default. It
+resolves the Cloud Run service URL for you, so it only needs the secret;
+everything else is optional:
+
+| Flag | Default |
+|---|---|
+| `--project=<id>` | current `gcloud config` project |
+| `--region=<region>` | `us-central1` |
+| `--service=<name>` | `continuum` |
+| `--url=<url>` | looked up from `--service`/`--region` |
+| `--schedule=<cron>` | `0 * * * *` (hourly) |
+| `--job-name=<name>` | `continuum-run-due-checkins` |
+
+`--secret` (or the `CRON_SECRET` env var) is the only required value, and
+it **must match** the `CRON_SECRET` env var already set on the Cloud Run
+service — otherwise every scheduled call gets a 401 from the route.
+Run `npm run setup:scheduler -- --help` for the full list, or
+`gcloud scheduler jobs run continuum-run-due-checkins --location us-central1`
+to trigger it immediately rather than waiting for the schedule.
+
+Prefer to see the raw command instead of running a script? It's exactly:
+
+```bash
+gcloud scheduler jobs create http continuum-run-due-checkins \
+  --schedule="0 * * * *" \
+  --uri="https://<your-service>/api/cron/run-due-checkins" \
+  --http-method=POST \
+  --headers="X-Cron-Secret=<CRON_SECRET>" \
+  --time-zone=UTC
+```
+
 No Cloud Tasks/Pub-Sub queue is required for this workload — one HTTP
 call evaluates every user's due check-ins per invocation, which is enough
 for the demo scale this app targets. See §72/§23 in the build spec for
