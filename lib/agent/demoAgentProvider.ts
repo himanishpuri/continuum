@@ -73,6 +73,7 @@ function generalDecision(): AgentDecision {
  */
 export function adherenceDecision(context: AgentContext): AgentDecision {
   const { progress, plan, user, evidence } = context;
+  const checkinPending = context.pendingCheckins.length > 0;
   const evidenceIds = evidence
     .map((e) => e.id)
     .filter((id) => id.startsWith("completion_") || ["preferred_time", "streak", "trend", "weekly_completion"].includes(id));
@@ -102,20 +103,22 @@ export function adherenceDecision(context: AgentContext): AgentDecision {
     return {
       intent: "improve_adherence",
       confidence: 0.75,
-      summary: `Your ${currentBucket.durationMinutes}-minute sessions already have your best completion rate (${pct(currentBucket.completionRate)}) — you're on the right plan. I'd recommend keeping this week's sessions as-is and checking in again to confirm the trend holds.`,
+      summary: `Your ${currentBucket.durationMinutes}-minute sessions already have your best completion rate (${pct(currentBucket.completionRate)}) — you're on the right plan. I'd recommend keeping this week's sessions as-is.`,
       evidenceIds,
-      nextStep: "Keep the current plan; schedule a confirmation check-in.",
-      proposedAction: {
-        actionType: "SCHEDULE_CHECKIN",
-        parameters: {
-          scheduledAt: addDaysIso(7),
-          message: "Checking in to confirm your current plan is still working well.",
-          planId: plan.id,
-        },
-        reason: "Current plan already matches the best-performing session length.",
-        riskLevel: "low",
-        requiresApproval: false,
-      },
+      nextStep: checkinPending ? "Keep the current plan; a check-in is already scheduled." : "Keep the current plan; schedule a confirmation check-in.",
+      proposedAction: checkinPending
+        ? null
+        : {
+            actionType: "SCHEDULE_CHECKIN",
+            parameters: {
+              scheduledAt: addDaysIso(7),
+              message: "Checking in to see how the plan is going.",
+              planId: plan.id,
+            },
+            reason: "Current plan already matches the best-performing session length.",
+            riskLevel: "low",
+            requiresApproval: false,
+          },
       requiresApproval: false,
       clarifyingQuestion: null,
       memoryCandidates: [],
@@ -126,20 +129,22 @@ export function adherenceDecision(context: AgentContext): AgentDecision {
     return {
       intent: "improve_adherence",
       confidence: 0.55,
-      summary: `Your overall completion rate over the last 30 days is ${pct(progress.completionRate)}, and it isn't clearly tied to session length yet. Rather than guess at a change, I'd like to check in again after a few more sessions.`,
+      summary: `Your overall completion rate over the last 30 days is ${pct(progress.completionRate)}, and it isn't clearly tied to session length yet. Rather than guess at a change, I'd like to see how a few more sessions go first.`,
       evidenceIds,
-      nextStep: "Schedule a check-in to gather more data before recommending a change.",
-      proposedAction: {
-        actionType: "SCHEDULE_CHECKIN",
-        parameters: {
-          scheduledAt: addDaysIso(3),
-          message: "How did your last few sessions go? I want to see if a schedule change would help.",
-          planId: plan.id,
-        },
-        reason: "Not enough evidence yet to recommend a specific plan change.",
-        riskLevel: "low",
-        requiresApproval: false,
-      },
+      nextStep: checkinPending ? "Wait for more session data; a check-in is already scheduled." : "Schedule a check-in to gather more data before recommending a change.",
+      proposedAction: checkinPending
+        ? null
+        : {
+            actionType: "SCHEDULE_CHECKIN",
+            parameters: {
+              scheduledAt: addDaysIso(3),
+              message: "Checking in to see how the plan is going.",
+              planId: plan.id,
+            },
+            reason: "Not enough evidence yet to recommend a specific plan change.",
+            riskLevel: "low",
+            requiresApproval: false,
+          },
       requiresApproval: false,
       clarifyingQuestion: null,
       memoryCandidates: [],

@@ -2,7 +2,7 @@ import { getRepositories } from "@/lib/repositories";
 import { retrieveRelevantMemories, summarizeMemories } from "@/lib/memory/memoryService";
 import { computeProgressSnapshot } from "@/lib/progress/progressEngine";
 import { buildEvidence } from "@/lib/evidence/evidenceEngine";
-import type { Evidence, Memory, Plan, ProgressSnapshot, UserRecord } from "@/lib/types";
+import type { CheckIn, Evidence, Memory, Plan, ProgressSnapshot, UserRecord } from "@/lib/types";
 
 export interface AgentContext {
   user: UserRecord;
@@ -10,6 +10,8 @@ export interface AgentContext {
   plan: Plan | null;
   progress: ProgressSnapshot;
   evidence: Evidence[];
+  /** Pending (not-yet-completed) check-ins, soonest first — so the agent doesn't schedule another on top. */
+  pendingCheckins: CheckIn[];
   /** ISO instant this context was assembled — the model's reference for resolving "yesterday", "on Wednesday", etc. */
   now: string;
   /** Human-readable labels for work already done while assembling this context — surfaced in the Agent Run UI (§9). */
@@ -27,15 +29,19 @@ export async function buildAgentContext(userId: string): Promise<AgentContext> {
   const user = await repos.users.getUser(userId);
   if (!user) throw new Error(`User not found: ${userId}`);
 
-  const [memories, plan, events] = await Promise.all([
+  const [memories, plan, events, checkins] = await Promise.all([
     retrieveRelevantMemories(userId),
     repos.plans.getActive(userId),
     repos.events.list(userId, { types: ["SESSION_COMPLETED", "SESSION_MISSED"], limit: 200 }),
+    repos.checkins.list(userId),
   ]);
 
   const now = new Date();
   const progress = computeProgressSnapshot(events, plan, now);
   const evidence = buildEvidence(progress, plan, user.preferences, now);
+  const pendingCheckins = checkins
+    .filter((c) => c.status === "pending")
+    .sort((a, b) => (a.scheduledAt < b.scheduledAt ? -1 : 1));
 
   return {
     user,
@@ -43,6 +49,7 @@ export async function buildAgentContext(userId: string): Promise<AgentContext> {
     plan,
     progress,
     evidence,
+    pendingCheckins,
     now: now.toISOString(),
     retrievedSteps: [
       "Retrieved relevant history",
@@ -97,6 +104,11 @@ export function buildContextBlock(context: AgentContext): string {
     ``,
     `CURRENT PLAN`,
     summarizePlan(context.plan),
+    ``,
+    `PENDING CHECK-INS`,
+    context.pendingCheckins.length === 0
+      ? "None scheduled."
+      : `${context.pendingCheckins.length} already scheduled; next on ${context.pendingCheckins[0].scheduledAt}. Do not schedule another.`,
     ``,
     `RECENT PROGRESS`,
     summarizeProgress(context.progress),

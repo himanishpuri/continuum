@@ -223,6 +223,21 @@ async function executeScheduleCheckin(userId: string, action: AgentAction): Prom
   const p = action.parameters as { scheduledAt: string; message: string; planId?: string | null };
   if (!p.scheduledAt || !p.message) throw new Error("SCHEDULE_CHECKIN requires scheduledAt and message.");
 
+  // Don't stack check-ins: if this plan already has a pending check-in scheduled
+  // for now or later, keep it and no-op. "Future pending" excludes the one the
+  // background job is currently processing (its scheduledAt is in the past).
+  const nowIso = new Date().toISOString();
+  const existing = (await getRepositories().checkins.list(userId)).find(
+    (c) => c.status === "pending" && (c.planId ?? null) === (p.planId ?? null) && c.scheduledAt >= nowIso
+  );
+  if (existing) {
+    return {
+      result: { checkinId: existing.id, scheduledAt: existing.scheduledAt, skipped: true },
+      eventType: "CHECKIN_SCHEDULED",
+      eventSummary: "A check-in is already scheduled — not adding another.",
+    };
+  }
+
   const checkin = await getRepositories().checkins.create(userId, {
     planId: p.planId ?? null,
     scheduledAt: p.scheduledAt,

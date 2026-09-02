@@ -34,15 +34,19 @@ export async function scheduleFollowupCheckin(userId: string, action: AgentActio
   if (!plan || !user) return null;
 
   const scheduledAt = computeCheckinDate(plan, 2).toISOString();
+  const message =
+    action.type === "CREATE_PLAN"
+      ? "How are the first few sessions of your new plan going?"
+      : "How did your last couple of sessions go with the updated plan?";
   const outcome = await proposeAction(userId, {
     proposal: {
       actionType: "SCHEDULE_CHECKIN",
       parameters: {
         scheduledAt,
-        message: "How did your last two sessions go with the updated plan?",
+        message,
         planId: plan.id,
       },
-      reason: "Automatic follow-up after a plan change.",
+      reason: action.type === "CREATE_PLAN" ? "Automatic follow-up on a new plan." : "Automatic follow-up after a plan change.",
       riskLevel: "low",
       requiresApproval: false,
     },

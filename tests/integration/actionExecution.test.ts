@@ -105,6 +105,32 @@ describe("action execution & idempotency", () => {
     expect(await getRepositories().checkins.list(userId)).toHaveLength(1);
   });
 
+  it("does not stack a second pending check-in on the same plan", async () => {
+    const userId = uid();
+    const plan = await seedUserWithPlan(userId);
+    const future = new Date(Date.now() + 1000 * 60 * 60 * 24 * 3).toISOString();
+    const mk = (message: string) => ({
+      proposal: {
+        actionType: "SCHEDULE_CHECKIN" as const,
+        parameters: { scheduledAt: future, message, planId: plan.id },
+        reason: "test",
+        riskLevel: "low" as const,
+        requiresApproval: false,
+      },
+      evidenceIds: [],
+      permissions,
+      autonomyLevel: "balanced" as const,
+    });
+
+    const first = await proposeAction(userId, mk("first"));
+    const second = await proposeAction(userId, mk("second"));
+
+    expect(first.action?.status).toBe("COMPLETED");
+    expect(second.action?.status).toBe("COMPLETED");
+    expect((second.action?.result as { skipped?: boolean })?.skipped).toBe(true);
+    expect(await getRepositories().checkins.list(userId)).toHaveLength(1);
+  });
+
   it("marks an action FAILED (not silently corrupting state) when execution throws", async () => {
     const userId = uid();
     await seedUserWithPlan(userId);
