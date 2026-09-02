@@ -2,6 +2,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { getAdminAuth, isFirebaseAdminConfigured } from "./firebaseAdmin";
+import { timingSafeEqualStr } from "@/lib/util/timingSafeEqual";
 
 const COOKIE_NAME = "continuum_session";
 const DEMO_PREFIX = "demo:";
@@ -25,13 +26,6 @@ function sign(payload: string): string {
   const secret = process.env.SESSION_SECRET;
   if (!secret) throw new Error("SESSION_SECRET is not configured.");
   return crypto.createHmac("sha256", secret).update(payload).digest("hex");
-}
-
-function timingSafeEqualStr(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 function encodeDemoToken(uid: string, expiresAt: number): string {

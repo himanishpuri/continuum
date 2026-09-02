@@ -20,7 +20,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     const followupCheckinId = await scheduleFollowupCheckin(auth.user.uid, action);
     return NextResponse.json({ action, followupCheckinId });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not approve this change.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    console.error("Approve plan change failed", err);
+    return NextResponse.json({ error: "Could not approve this change." }, { status: 400 });
   }
 }

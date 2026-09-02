@@ -47,3 +47,6 @@ next-env.d.ts
 
 # firebase service account files if placed locally
 *serviceAccount*.json
+
+# project-local agent notes (not for the public repo)
+CLAUDE.md

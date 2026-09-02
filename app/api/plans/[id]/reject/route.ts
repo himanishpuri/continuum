@@ -18,7 +18,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     const action = await rejectAction(auth.user.uid, match.id);
     return NextResponse.json({ action });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not reject this change.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    console.error("Reject plan change failed", err);
+    return NextResponse.json({ error: "Could not reject this change." }, { status: 400 });
   }
 }

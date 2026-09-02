@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runDueCheckinsForAllUsers } from "@/lib/background/runDueCheckins";
+import { timingSafeEqualStr } from "@/lib/util/timingSafeEqual";
 
 /**
  * §23: the production target for a scheduled background job. Authorized by
@@ -15,9 +16,9 @@ import { runDueCheckinsForAllUsers } from "@/lib/background/runDueCheckins";
 function isAuthorized(request: Request): boolean {
   const expected = process.env.CRON_SECRET;
   if (!expected) return false;
-  const header = request.headers.get("x-cron-secret");
-  const bearer = request.headers.get("authorization");
-  return header === expected || bearer === `Bearer ${expected}`;
+  const header = request.headers.get("x-cron-secret") ?? "";
+  const bearer = request.headers.get("authorization") ?? "";
+  return timingSafeEqualStr(header, expected) || timingSafeEqualStr(bearer, `Bearer ${expected}`);
 }
 
 async function handle(request: Request) {

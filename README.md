@@ -1,5 +1,8 @@
 # Continuum
 
+**Live:** https://continuum.himanishpuri.dev (Firebase sign-in, or nothing
+to install — see [Local setup](#local-setup) for the credential-free demo).
+
 Continuum is a persistent, agentic personal wellbeing and recovery
 planning assistant. It is **not** a diagnostic or clinical tool — it never
 diagnoses, prescribes, or gives emergency medical advice. It helps with
@@ -54,8 +57,8 @@ aren't checked into this repo.)_
 
 - **Frontend:** Next.js 16 (App Router), React 19, TypeScript, Tailwind
   CSS v4, `@tanstack/react-query`, `recharts`.
-- **Backend:** Next.js Route Handlers (Node.js runtime), deployed as one
-  Cloud Run service.
+- **Backend:** Next.js Route Handlers (Node.js runtime). Runs on Vercel
+  (the live deploy); a Cloud Run path is also maintained.
 - **AI:** Google Gemini via Genkit (`genkit` + `@genkit-ai/google-genai`),
   structured (Zod-validated) output, a controlled tool registry.
 - **Database:** Firestore in production; a local JSON-file store (same
@@ -184,11 +187,11 @@ Covers (see `tests/unit` and `tests/integration`):
 - **Actions** — immediate execution, approval-gated execution,
   idempotent retries (same `idempotencyKey` never double-executes),
   failure handling (`FAILED` status, no partial state), rejection.
-- **The critical agent scenario (§49 of the build spec)** — a user with
-  30-minute sessions and historically much better 15-minute adherence,
-  saying "I'm struggling to stay consistent," is proposed a plan change
-  that requires approval and only takes effect once approved — run
-  end-to-end through `DemoAgentProvider`.
+- **The critical agent scenario** — a user with 30-minute sessions and
+  historically much better 15-minute adherence, saying "I'm struggling to
+  stay consistent," is proposed a plan change that requires approval and
+  only takes effect once approved — run end-to-end through
+  `DemoAgentProvider`.
 - **Background check-ins** — one missed session out of five doesn't
   trigger an intervention; a severe adherence drop does, and schedules a
   follow-up.
@@ -322,10 +325,9 @@ gcloud scheduler jobs create http continuum-run-due-checkins \
   --time-zone=UTC
 ```
 
-No Cloud Tasks/Pub-Sub queue is required for this workload — one HTTP
+No Cloud Tasks / Pub-Sub queue is required for this workload — one HTTP
 call evaluates every user's due check-ins per invocation, which is enough
-for the demo scale this app targets. See §72/§23 in the build spec for
-why heavier infrastructure was intentionally not introduced.
+at the scale this app targets.
 
 ## Security model
 
@@ -344,13 +346,24 @@ why heavier infrastructure was intentionally not introduced.
 - **Idempotency** — every `AgentAction` carries an `idempotencyKey`;
   `toolExecutor.ts` looks up a prior completed action with the same key
   before doing anything, so retries can't double-execute.
+- **Prompt injection is contained by the gate, not the prompt.** User
+  messages and remembered facts go into the model's context, so a user
+  can make the agent *say* odd things — but the deterministic policy
+  engine plus Zod validation of tool parameters mean it can't *do*
+  anything consequential without the policy allowing it and (for plan
+  changes, external messages, memory deletion) the user approving it.
 - **Safety boundary** — a deterministic keyword guard
   (`src/ai/agent/prompts.ts`) intercepts clearly urgent/self-harm
   language before it ever reaches the model, returning a fixed
   safety-resources message.
 - Secrets (`GEMINI_API_KEY`, `FIREBASE_PRIVATE_KEY`, `SESSION_SECRET`,
   `CRON_SECRET`) are read only from server-side env vars, never bundled
-  to the client.
+  to the client. The cron endpoint compares `CRON_SECRET` in constant
+  time.
+- HTTP security headers (`X-Frame-Options`, `X-Content-Type-Options`,
+  `Referrer-Policy`, `Permissions-Policy`) are set in `next.config.ts`;
+  Vercel adds HSTS. Per-user rate limits guard the agent and event
+  endpoints (`lib/util/rateLimit.ts`). See [`SECURITY.md`](SECURITY.md).
 
 ## Data model
 
@@ -386,28 +399,23 @@ candidates.
 
 ## Limitations
 
-- **No live Gemini or Firebase project is reachable in this build/test
-  environment.** `GeminiAgentProvider`, the Firestore repositories, and
-  Firebase Auth are fully implemented (not stubbed) but were only
-  exercised via `DemoAgentProvider` and the local JSON store here — wire
-  up real credentials (see above) to exercise them live.
-- **No browser automation was available while building this**, so the UI
-  was verified via TypeScript/build correctness, ESLint, the automated
-  test suite, and a manual API-level walkthrough of the full demo
-  scenario rather than click-through screenshots.
-- **Cloud Scheduler/Cloud Tasks are not actually provisioned** — there is
-  a working, guarded HTTP endpoint (`/api/cron/run-due-checkins`) for
-  Scheduler to call, and a local equivalent for development, but no GCP
-  project was attached to provision the schedule itself.
+- **Gemini free tier is ~20 requests/day per model.** The decision call
+  falls back to a lighter model (`GEMINI_FALLBACK_MODELS`) when the
+  primary is rate-limited or retired; when everything is exhausted the
+  agent returns a "try again in a moment" message. A paid Gemini API key
+  removes this.
+- **The background check-in job runs once per day** (08:00 UTC) on the
+  Vercel Hobby plan — `vercel.json` schedules it. Pro plans or the Cloud
+  Run + Cloud Scheduler path can run it more often.
+- **Rate limiting is in-process** (`lib/util/rateLimit.ts`) — fine for the
+  single-instance deployment this targets, not for a scaled-out one.
 - The proposal card in the Agent chat supports **Approve** and **Reject**
-  but not an inline **Edit** of the proposed values before approving —
-  the underlying edit-and-resubmit flow wasn't built out for this pass.
+  but not an inline **Edit** of the proposed values before approving.
 
 ## Future improvements
 
-Agent run replay, memory confidence visualization, plan comparison view,
-a dedicated "why did you recommend this?" panel beyond the inline
-evidence list, a simulation/time-travel mode for demos, richer activity
-filtering, dark-mode toggle (currently follows OS preference only), and
-keyboard shortcuts (§67 of the build spec) were left out to keep the P0/P1
-scope solid rather than spreading thin across polish items.
+Agent run replay, memory-confidence visualization, a plan comparison
+view, a dedicated "why did you recommend this?" panel beyond the inline
+evidence list, a simulation / time-travel mode for demos, richer activity
+filtering, a dark-mode toggle (currently follows OS preference only), and
+keyboard shortcuts.

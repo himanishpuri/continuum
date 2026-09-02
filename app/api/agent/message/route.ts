@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "genkit";
 import { requireApiUser } from "@/lib/auth/apiAuth";
 import { sendAgentMessage } from "@/lib/agent/agentService";
+import { checkRateLimit } from "@/lib/util/rateLimit";
 
 const BodySchema = z.object({
   message: z.string().min(1).max(4000),
@@ -11,6 +12,11 @@ const BodySchema = z.object({
 export async function POST(request: Request) {
   const auth = await requireApiUser();
   if ("response" in auth) return auth.response;
+
+  const rate = checkRateLimit(`agent:${auth.user.uid}`, 15, 60_000);
+  if (!rate.ok) {
+    return NextResponse.json({ error: "You're sending messages too fast — give it a moment." }, { status: 429, headers: { "Retry-After": String(rate.retryAfter) } });
+  }
 
   const parsed = BodySchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
