@@ -23,6 +23,17 @@ function computeCheckinDate(plan: Plan, sessionsAhead: number): Date {
  * no separate user action needed.
  */
 export async function scheduleFollowupCheckin(userId: string, action: AgentAction): Promise<string | null> {
+  try {
+    return await scheduleFollowupCheckinInner(userId, action);
+  } catch (err) {
+    // A follow-up check-in is a nice-to-have; never let it fail the approval
+    // that already executed successfully.
+    console.error("scheduleFollowupCheckin failed", err);
+    return null;
+  }
+}
+
+async function scheduleFollowupCheckinInner(userId: string, action: AgentAction): Promise<string | null> {
   if (action.status !== "COMPLETED") return null;
   if (action.type !== "MODIFY_PLAN" && action.type !== "CREATE_PLAN") return null;
 

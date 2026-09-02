@@ -3,6 +3,7 @@ import { z } from "genkit";
 import { requireApiUser } from "@/lib/auth/apiAuth";
 import { getRepositories } from "@/lib/repositories";
 import { checkRateLimit } from "@/lib/util/rateLimit";
+import { resolveSessionTimestamp } from "@/lib/util/sessionTimestamp";
 
 const BodySchema = z.object({
   type: z.enum(["SESSION_COMPLETED", "SESSION_MISSED"]),
@@ -10,13 +11,6 @@ const BodySchema = z.object({
   timestamp: z.string().optional(),
   summary: z.string().max(500).optional(),
 });
-
-/** Client-supplied timestamp is honoured only if it parses and isn't in the future. */
-function resolveTimestamp(raw: string | undefined): string {
-  const now = Date.now();
-  const parsed = raw ? Date.parse(raw) : NaN;
-  return !Number.isNaN(parsed) && parsed <= now + 60_000 ? new Date(parsed).toISOString() : new Date(now).toISOString();
-}
 
 /**
  * Direct, user-authenticated logging of a session outcome (e.g. a "mark
@@ -39,7 +33,7 @@ export async function POST(request: Request) {
   const { type, durationMinutes, timestamp, summary } = parsed.data;
   const event = await getRepositories().events.create(auth.user.uid, {
     type,
-    timestamp: resolveTimestamp(timestamp),
+    timestamp: resolveSessionTimestamp(timestamp),
     source: "user",
     payload: { durationMinutes: durationMinutes ?? null, reportedVia: "manual" },
     summary: summary ?? (type === "SESSION_COMPLETED" ? "Session marked complete." : "Session marked missed."),

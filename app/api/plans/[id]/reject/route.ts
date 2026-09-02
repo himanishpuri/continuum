@@ -19,6 +19,6 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ action });
   } catch (err) {
     console.error("Reject plan change failed", err);
-    return NextResponse.json({ error: "Could not reject this change." }, { status: 400 });
+    return NextResponse.json({ error: "Could not reject this — it may have expired or already been handled. Refresh to see the current state." }, { status: 400 });
   }
 }

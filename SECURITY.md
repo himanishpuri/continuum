@@ -25,7 +25,11 @@ Expect an acknowledgement within a few days.
   `CRON_SECRET`) are server-side env vars only. The `NEXT_PUBLIC_FIREBASE_*`
   values are the public Firebase Web App config, not secrets.
 - The cron endpoint (`/api/cron/run-due-checkins`) authenticates with a
-  constant-time comparison of `CRON_SECRET`.
+  constant-time comparison of `CRON_SECRET` that leaks neither the value nor
+  its length (`lib/util/timingSafeEqual.ts` HMAC-blinds both operands first).
+- Self-reported session events are only accepted with a timestamp inside a
+  sane window (not future, not more than a year back) so progress stats
+  can't be poisoned by a back- or post-dated event.
 - Security headers (`X-Frame-Options`, `X-Content-Type-Options`,
   `Referrer-Policy`, `Permissions-Policy`) are set in `next.config.ts`; the host
   (Vercel) adds HSTS.

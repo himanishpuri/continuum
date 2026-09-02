@@ -21,6 +21,6 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ action, followupCheckinId });
   } catch (err) {
     console.error("Approve plan change failed", err);
-    return NextResponse.json({ error: "Could not approve this change." }, { status: 400 });
+    return NextResponse.json({ error: "Could not approve this — it may have expired or already been handled. Refresh to see the current state." }, { status: 400 });
   }
 }

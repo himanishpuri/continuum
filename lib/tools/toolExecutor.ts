@@ -2,6 +2,7 @@ import { getRepositories } from "@/lib/repositories";
 import { getCalendarService } from "@/lib/external/calendarService";
 import { getNotificationService } from "@/lib/external/notificationService";
 import * as memoryService from "@/lib/memory/memoryService";
+import { resolveSessionTimestamp } from "@/lib/util/sessionTimestamp";
 import type { AgentAction, EventType, MemoryType, Plan, PlanVersionChange } from "@/lib/types";
 
 interface ExecutionResult {
@@ -295,16 +296,6 @@ async function executeDeleteMemory(userId: string, action: AgentAction): Promise
     eventType: "MEMORY_DELETED",
     eventSummary: "Deleted a memory at the agent's suggestion.",
   };
-}
-
-/** Accept the model's session timestamp only if it parses and isn't in the future; otherwise fall back to now. */
-function resolveSessionTimestamp(raw: string | undefined): string {
-  const now = Date.now();
-  if (raw) {
-    const parsed = Date.parse(raw);
-    if (!Number.isNaN(parsed) && parsed <= now + 60_000) return new Date(parsed).toISOString();
-  }
-  return new Date(now).toISOString();
 }
 
 async function executeRecordEvent(userId: string, action: AgentAction): Promise<ExecutionResult> {
