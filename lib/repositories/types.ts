@@ -12,6 +12,7 @@ import type {
   MemoryType,
   Plan,
   PlanVersion,
+  PushSubscriptionRecord,
   UserPreferences,
   UserProfile,
   UserRecord,
@@ -70,6 +71,11 @@ export interface CheckinsRepository extends CrudRepository<CheckIn> {
   listDue(userId: string, atOrBefore: string): Promise<CheckIn[]>;
 }
 
+export interface PushSubscriptionsRepository extends CrudRepository<PushSubscriptionRecord> {
+  findByEndpoint(userId: string, endpoint: string): Promise<PushSubscriptionRecord | null>;
+  deleteByEndpoint(userId: string, endpoint: string): Promise<void>;
+}
+
 export interface ConversationsRepository extends CrudRepository<Conversation> {
   addMessage(userId: string, conversationId: string, message: Omit<ConversationMessage, "id" | "conversationId">): Promise<ConversationMessage>;
   listMessages(userId: string, conversationId: string): Promise<ConversationMessage[]>;
@@ -84,6 +90,7 @@ export interface Repositories {
   agentRuns: AgentRunsRepository;
   actions: ActionsRepository;
   checkins: CheckinsRepository;
+  pushSubscriptions: PushSubscriptionsRepository;
   conversations: ConversationsRepository;
   /** Enumerate user ids — used by the background job to scan for due check-ins. */
   listUserIds(): Promise<string[]>;

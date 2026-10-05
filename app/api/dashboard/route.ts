@@ -25,6 +25,9 @@ export async function GET() {
   const nextCheckin = nextCheckins
     .filter((c) => c.status === "pending")
     .sort((a, b) => (a.scheduledAt < b.scheduledAt ? -1 : 1))[0] ?? null;
+  const latestCheckin = nextCheckins
+    .filter((c) => c.status === "completed")
+    .sort((a, b) => (a.completedAt ?? a.scheduledAt) < (b.completedAt ?? b.scheduledAt) ? 1 : -1)[0] ?? null;
 
   return NextResponse.json({
     profile: context.user.profile,
@@ -36,5 +39,6 @@ export async function GET() {
       proposedAction: decision.proposedAction,
     },
     nextCheckin,
+    latestCheckin,
   });
 }

@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "rimraf .demo-data-test && vitest run",
+    "eval": "rimraf .demo-data-eval && vitest run -c vitest.eval.config.ts --reporter=verbose",
     "test:watch": "vitest",
     "seed": "tsx scripts/seed-demo.ts",
     "vercel:env": "bash scripts/vercel-env.sh"
@@ -27,7 +28,8 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "recharts": "^3.10.1",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -36,6 +38,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^6.1.1",
     "dotenv": "^17.4.2",
     "eslint": "^9",

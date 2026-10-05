@@ -47,7 +47,7 @@ export function ActionApprovalCard({ data }: { data: ActionCardData }) {
     try {
       const res = await api.post<{ action: { status: string } }>(`/api/actions/${data.actionId}/${kind}`);
       setStatus(res.action.status);
-      for (const key of ["dashboard", "plans", "progress"]) {
+      for (const key of ["dashboard", "plans", "plan-versions", "progress"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
     } catch (err) {

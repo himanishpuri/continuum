@@ -232,6 +232,7 @@ export interface AgentAction {
   id: ID;
   userId: ID;
   type: ActionType;
+  initiatedBy?: "user" | "agent";
   parameters: Record<string, unknown>;
   reason: string;
   evidenceIds: string[];
@@ -262,8 +263,19 @@ export interface CheckIn {
   completedAt: string | null;
   status: CheckinStatus;
   message: string;
+  /** The agent's evaluation of progress; the user's reply is selfReport. */
   response: string | null;
+  selfReport?: { confidence: number; note: string | null; answeredAt: string }; // 0–10 MI confidence ruler
   createdBy: "user" | "agent";
+  createdAt: string;
+}
+
+export interface PushSubscriptionRecord {
+  id: ID;
+  userId: ID;
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  userAgent: string;
   createdAt: string;
 }
 

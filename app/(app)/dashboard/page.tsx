@@ -9,6 +9,7 @@ import { StatCard } from "@/components/dashboard/StatCard";
 import { RecommendationCard } from "@/components/dashboard/RecommendationCard";
 import { PlanCard, formatTime } from "@/components/plans/PlanCard";
 import { Button } from "@/components/ui/Button";
+import { Card, CardHeader, CardTitle } from "@/components/ui/Card";
 import type { CheckIn, Evidence, Plan, ProgressSnapshot, UserProfile } from "@/lib/types";
 import type { ActionProposal } from "@/src/ai/schemas/actionSchemas";
 
@@ -18,6 +19,7 @@ interface DashboardResponse {
   progress: ProgressSnapshot;
   recommendation: { summary: string; evidence: Evidence[]; proposedAction: ActionProposal | null };
   nextCheckin: CheckIn | null;
+  latestCheckin: CheckIn | null;
 }
 
 function greeting(): string {
@@ -31,6 +33,10 @@ export default function DashboardPage() {
   const queryClient = useQueryClient();
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
+  const [confidence, setConfidence] = useState(5);
+  const [note, setNote] = useState("");
+  const [replying, setReplying] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["dashboard"],
@@ -48,6 +54,17 @@ export default function DashboardPage() {
     } finally {
       setApplying(false);
     }
+  }
+
+  async function replyToCheckin(id: string) {
+    setReplying(true);
+    setReplyError(null);
+    try {
+      await api.patch(`/api/checkins/${id}`, { confidence, note });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    } catch (error) {
+      setReplyError(error instanceof Error ? error.message : "Couldn't save your reply.");
+    } finally { setReplying(false); }
   }
 
   if (isLoading) return <LoadingState label="Loading your dashboard…" />;
@@ -99,6 +116,25 @@ export default function DashboardPage() {
         applying={applying}
         applied={applied}
       />
+
+      {data.latestCheckin && <Card id="checkin">
+        <CardHeader><CardTitle>Latest check-in</CardTitle></CardHeader>
+        <p className="text-sm text-slate-700 dark:text-slate-300">{data.latestCheckin.message}</p>
+        {data.latestCheckin.response && <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Continuum&apos;s review: {data.latestCheckin.response}</p>}
+        {data.latestCheckin.selfReport ? <div className="mt-4 text-sm text-slate-700 dark:text-slate-300">
+          <p>Your confidence: {data.latestCheckin.selfReport.confidence}/10</p>
+          {data.latestCheckin.selfReport.note && <p className="mt-1">Your note: {data.latestCheckin.selfReport.note}</p>}
+        </div> : <div className="mt-4 space-y-3">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300" htmlFor="confidence">How confident are you that you can keep your plan this week?</label>
+          <select id="confidence" value={confidence} onChange={(event) => setConfidence(Number(event.target.value))} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900">
+            {Array.from({ length: 11 }, (_, value) => <option key={value} value={value}>{value}/10</option>)}
+          </select>
+          <label className="block text-sm text-slate-600 dark:text-slate-400" htmlFor="checkin-note">Optional note</label>
+          <textarea id="checkin-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} rows={2} className="block w-full rounded-lg border border-slate-300 p-2 text-sm dark:border-slate-700 dark:bg-slate-900" />
+          <Button size="sm" onClick={() => replyToCheckin(data.latestCheckin!.id)} disabled={replying}>{replying ? "Saving…" : "Save reply"}</Button>
+          {replyError && <p className="text-sm text-rose-600">{replyError}</p>}
+        </div>}
+      </Card>}
     </div>
   );
 }

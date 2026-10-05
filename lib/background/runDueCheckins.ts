@@ -2,6 +2,7 @@ import { getRepositories } from "@/lib/repositories";
 import { computeProgressSnapshot } from "@/lib/progress/progressEngine";
 import { buildEvidence } from "@/lib/evidence/evidenceEngine";
 import { proposeAction } from "@/lib/tools/actionService";
+import { getNotificationService } from "@/lib/external/notificationService";
 import type { CheckIn, Plan, ProgressSnapshot, UserRecord } from "@/lib/types";
 
 export interface CheckinRunResult {
@@ -115,6 +116,24 @@ async function evaluateCheckin(
     completedAt: now.toISOString(),
     response: message,
   });
+
+  // §51: this is the user's opted-in reminder, not an agent SEND_EXTERNAL_MESSAGE action.
+  if (user.preferences.reminderEnabled) {
+    try {
+      const sent = await getNotificationService().send({
+        userId, channel: "push", title: "Continuum check-in", message, url: "/dashboard#checkin",
+      });
+      if (sent.delivered) {
+        await repos.events.create(userId, {
+          type: "MESSAGE_SENT", timestamp: now.toISOString(), source: "background",
+          payload: { checkinId: completedCheckin.id, notificationId: sent.id },
+          summary: "Sent your check-in reminder.",
+        });
+      }
+    } catch (error) {
+      console.error("Check-in notification failed", userId, error);
+    }
+  }
 
   await repos.events.create(userId, {
     type: "CHECKIN_COMPLETED",

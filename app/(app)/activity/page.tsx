@@ -7,6 +7,7 @@ import { LoadingState, ErrorState, EmptyState } from "@/components/ui/States";
 import { Card } from "@/components/ui/Card";
 import { ActivityItem } from "@/components/activity/ActivityItem";
 import type { EventRecord } from "@/lib/types";
+import type { AgentMetrics } from "@/lib/metrics/agentMetrics";
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -28,6 +29,7 @@ export default function ActivityPage() {
     queryKey: ["activity"],
     queryFn: () => api.get<{ events: EventRecord[] }>("/api/activity?limit=100"),
   });
+  const metricsQuery = useQuery({ queryKey: ["agent-metrics"], queryFn: () => api.get<{ metrics: AgentMetrics }>("/api/agent/metrics") });
 
   if (isLoading) return <LoadingState label="Loading activity…" />;
   if (isError || !data) return <ErrorState message="Couldn't load activity." onRetry={() => refetch()} />;
@@ -40,6 +42,23 @@ export default function ActivityPage() {
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Activity</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Every meaningful thing Continuum has done, in order.</p>
       </div>
+
+      <Card>
+        <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Agent insights</h2>
+        {metricsQuery.isLoading && <p className="mt-2 text-sm text-slate-500">Loading insights…</p>}
+        {metricsQuery.isError && <p className="mt-2 text-sm text-rose-600">Couldn&apos;t load insights.</p>}
+        {metricsQuery.data && <div className="mt-3 grid gap-2 text-sm text-slate-600 dark:text-slate-400 sm:grid-cols-2 lg:grid-cols-3">
+          <p>Approvals: {formatRate(metricsQuery.data.metrics.approvalRate)} · Rejections: {formatRate(metricsQuery.data.metrics.rejectionRate)}</p>
+          <p>Degraded turns: {formatRate(metricsQuery.data.metrics.degradedRate)}</p>
+          <p>Safety stops: {metricsQuery.data.metrics.safetyStops}</p>
+          <p>Median latency: {metricsQuery.data.metrics.p50LatencyMs === null ? "No data" : `${Math.round(metricsQuery.data.metrics.p50LatencyMs)} ms`}</p>
+          <p>Tokens per measured turn: {metricsQuery.data.metrics.tokensPerTurn === null ? "No data" : Math.round(metricsQuery.data.metrics.tokensPerTurn)}</p>
+          <p>Latest confidence: {metricsQuery.data.metrics.confidenceTrend.latest === null ? "No rating" : `${metricsQuery.data.metrics.confidenceTrend.latest}/10`}</p>
+          {metricsQuery.data.metrics.postInterventionAdherence.length > 0 && <p className="sm:col-span-2 lg:col-span-3">
+            Last plan change, 14-day completion: {formatRate(metricsQuery.data.metrics.postInterventionAdherence.at(-1)!.beforeRate)} before → {formatRate(metricsQuery.data.metrics.postInterventionAdherence.at(-1)!.afterRate)} after
+          </p>}
+        </div>}
+      </Card>
 
       <div className="flex gap-2" role="tablist" aria-label="Filter activity">
         {FILTERS.map((f) => (
@@ -72,4 +91,8 @@ export default function ActivityPage() {
       )}
     </div>
   );
+}
+
+function formatRate(value: number | null): string {
+  return value === null ? "No data" : `${Math.round(value * 100)}%`;
 }

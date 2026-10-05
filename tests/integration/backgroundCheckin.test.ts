@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getRepositories } from "@/lib/repositories";
 import { runDueCheckinsForUser } from "@/lib/background/runDueCheckins";
+import * as notifications from "@/lib/external/notificationService";
+
+afterEach(() => vi.restoreAllMocks());
 
 function uid() {
   return `test-bg-${randomUUID()}`;
@@ -41,6 +44,31 @@ async function seedUser(userId: string, now: Date) {
 }
 
 describe("background check-in evaluation (§23/§24)", () => {
+  it("sends only opted-in reminders and records only delivered pushes", async () => {
+    const repos = getRepositories();
+    const send = vi.fn().mockResolvedValueOnce({ id: "n1", delivered: false }).mockResolvedValueOnce({ id: "n2", delivered: true });
+    vi.spyOn(notifications, "getNotificationService").mockReturnValue({ send });
+    const now = new Date();
+    const userId = uid();
+    const plan = await seedUser(userId, now);
+    const addDue = () => repos.checkins.create(userId, {
+      planId: plan.id, scheduledAt: new Date(now.getTime() - 1000).toISOString(), completedAt: null,
+      status: "pending", message: "How is it going?", response: null, createdBy: "agent", createdAt: now.toISOString(),
+    });
+    await addDue();
+    await runDueCheckinsForUser(userId, now);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((await repos.events.list(userId)).filter((event) => event.type === "MESSAGE_SENT")).toHaveLength(0);
+    await repos.users.updatePreferences(userId, { reminderEnabled: false });
+    await addDue();
+    await runDueCheckinsForUser(userId, now);
+    expect(send).toHaveBeenCalledTimes(1);
+    await repos.users.updatePreferences(userId, { reminderEnabled: true });
+    await addDue();
+    await runDueCheckinsForUser(userId, now);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect((await repos.events.list(userId)).filter((event) => event.type === "MESSAGE_SENT")).toHaveLength(1);
+  });
   it("does not intervene when adherence is strong — one miss out of five isn't panic-worthy", async () => {
     const userId = uid();
     const now = new Date();
