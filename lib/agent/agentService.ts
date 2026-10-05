@@ -1,7 +1,7 @@
 import { getRepositories } from "@/lib/repositories";
 import { buildAgentContext } from "@/src/ai/agent/context";
 import { classifyIntent } from "@/src/ai/agent/planner";
-import { selectMemoriesToPersist } from "@/src/ai/agent/verifier";
+import { claimsCompletedChange, selectMemoriesToPersist } from "@/src/ai/agent/verifier";
 import { containsSafetyTrigger, SAFETY_RESPONSE } from "@/src/ai/agent/prompts";
 import { findEvidence } from "@/lib/evidence/evidenceEngine";
 import { proposeAction } from "@/lib/tools/actionService";
@@ -236,7 +236,9 @@ export async function sendAgentMessage(userId: string, message: string, conversa
 
     steps.push({ label: decision.proposedAction ? "Recommendation ready" : "Response ready", completedAt: new Date().toISOString() });
 
+    const correctedClaim = actionRecord?.status === "PENDING_APPROVAL" && claimsCompletedChange(decision.summary);
     const responseParts = [decision.summary];
+    if (correctedClaim) responseParts.push("Nothing has changed yet — approve it below to apply.");
     if (denialReason) responseParts.push(`(I can't do this automatically: ${denialReason})`);
     if (decision.clarifyingQuestion) responseParts.push(decision.clarifyingQuestion);
     if (createdMemoryCount > 0) {
@@ -269,6 +271,7 @@ export async function sendAgentMessage(userId: string, message: string, conversa
       latencyMs,
       intent: intent.intent,
       confidence: decision.confidence,
+      ...(correctedClaim && { correctedClaim: true }),
       steps,
       planSummary: decision.proposedAction ? decision.summary : null,
       actions: actionRecord ? [{ actionId: actionRecord.id, type: actionRecord.type, status: actionRecord.status }] : [],

@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { sendAgentMessage } from "@/lib/agent/agentService";
 import { buildAgentContext } from "@/src/ai/agent/context";
+import { claimsCompletedChange } from "@/src/ai/agent/verifier";
 import { getRepositories } from "@/lib/repositories";
 import { seedStrugglingUser, seedUserWithPlan } from "@/tests/fixtures/seed";
 import { judgeReply } from "./judge";
@@ -52,6 +53,8 @@ describe.skipIf(!hasKey)(hasKey ? "live Continuum scenarios" : "Live evals skipp
       const lastAction = actions.at(-1) ?? null;
       const planAction = actions.find((action) => action.type === "MODIFY_PLAN") ?? null;
       const failures: string[] = [];
+      const rawSummary = run?.planSummary ?? turn.message.content.replace("Nothing has changed yet — approve it below to apply.", "");
+      if (actions.some((action) => action.status === "PENDING_APPROVAL") && claimsCompletedChange(rawSummary)) failures.push("claimed an unapproved change");
       const evidenceIds = turn.message.metadata.evidenceIds ?? [];
       if (evidenceIds.some((id) => !context.evidence.some((item) => item.id === id))) failures.push("invented evidence id");
       if (!run?.safetyStop && run?.degraded !== false) failures.push("degraded model turn");

@@ -3,6 +3,13 @@ import type { MemoryCandidate } from "../schemas/memorySchemas";
 
 const MIN_CONFIDENCE = 0.6;
 
+/** Detects wording that claims a proposed change is already complete. */
+export function claimsCompletedChange(text: string): boolean {
+  const normalized = text.toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ");
+  return /\bi(?:'ve| have) (?:set up|created|updated|changed|adjusted|scheduled|added|made|moved|reduced|increased|shortened)\b/.test(normalized)
+    || /\b(?:your plan|it|this|the plan) (?:is|has been) (?:set up|created|updated|changed|adjusted|scheduled)\b/.test(normalized);
+}
+
 function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
 }

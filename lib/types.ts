@@ -190,6 +190,7 @@ export interface AgentRun {
   latencyMs?: number;
   usage?: { inputTokens: number; outputTokens: number };
   degraded?: boolean;
+  correctedClaim?: boolean;
   intent?: string;
   confidence?: number;
   safetyStop?: boolean;

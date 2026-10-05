@@ -22,6 +22,47 @@ afterEach(() => vi.restoreAllMocks());
  * test runs in DEMO_MODE.
  */
 describe("critical agent scenario (§49)", () => {
+  it.each([
+    { summary: "I have set up a daily plan for you.", correctedClaim: true },
+    { summary: "I can set up a daily plan for you.", correctedClaim: false },
+  ])("keeps a pending CREATE_PLAN reply truthful: $summary", async ({ summary, correctedClaim }) => {
+    const userId = uid();
+    const plan = await seedStrugglingUser(userId);
+    vi.spyOn(DemoAgentProvider.prototype, "handleMessage").mockResolvedValue({
+      decision: {
+        intent: "general_request",
+        confidence: 0.9,
+        summary,
+        evidenceIds: [],
+        nextStep: "Propose a plan",
+        safetyConcern: "none",
+        proposedAction: {
+          actionType: "CREATE_PLAN",
+          parameters: { title: "Daily Plan", goal: "Improve consistency", durationMinutes: 15, daysOfWeek: [1, 2, 3, 4, 5, 6, 0], time: "19:00" },
+          reason: "A daily routine may help.",
+          riskLevel: "medium",
+          requiresApproval: false,
+        },
+        requiresApproval: false,
+        clarifyingQuestion: null,
+        memoryCandidates: [],
+      },
+      steps: [],
+    });
+
+    const result = await sendAgentMessage(userId, "Help me plan my week.");
+    const repos = getRepositories();
+    const action = (await repos.actions.list(userId)).at(-1);
+    const run = await repos.agentRuns.get(userId, result.runId);
+
+    expect(action).toMatchObject({ type: "CREATE_PLAN", status: "PENDING_APPROVAL" });
+    expect(result.pendingApproval?.actionId).toBe(action?.id);
+    expect(result.message.content).toContain(summary);
+    expect(result.message.content.includes("Nothing has changed yet")).toBe(correctedClaim);
+    expect(run?.correctedClaim).toBe(correctedClaim ? true : undefined);
+    expect((await repos.plans.list(userId)).map((item) => item.id)).toEqual([plan.id]);
+  });
+
   it("counts a completed direct CREATE_MEMORY proposal in the reply", async () => {
     const userId = uid();
     await seedStrugglingUser(userId);
