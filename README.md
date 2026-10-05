@@ -77,7 +77,7 @@ background execution, and a full request sequence.
 ## Local setup
 
 ```bash
-npm install
+bun i          # dependencies are locked in bun.lock
 npm run seed   # populates the demo user "Alex" with realistic history
 npm run dev    # http://localhost:3000
 ```
