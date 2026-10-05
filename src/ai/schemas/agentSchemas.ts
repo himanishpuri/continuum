@@ -30,6 +30,7 @@ export const AgentDecisionSchema = z.object({
     .describe("What you noticed and recommend, in plain language. No hidden reasoning."),
   evidenceIds: z.array(z.string()),
   nextStep: z.string(),
+  safetyConcern: z.enum(["none", "urgent"]).default("none").describe("Set urgent for self-harm, suicide, harm to others, or medical-emergency content; otherwise none."),
   proposedAction: ActionProposalSchema.nullable(),
   requiresApproval: z.boolean(),
   clarifyingQuestion: z.string().nullable(),

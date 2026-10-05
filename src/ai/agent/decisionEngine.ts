@@ -37,6 +37,7 @@ function fallbackDecision(clarifyingQuestion: string): AgentDecision {
     summary: "I wasn't able to form a clear recommendation from that.",
     evidenceIds: [],
     nextStep: "Ask a clarifying question.",
+    safetyConcern: "none",
     proposedAction: null,
     requiresApproval: false,
     clarifyingQuestion,
@@ -143,6 +144,7 @@ export async function decide(request: DecisionRequest): Promise<{ decision: Agen
       return finish(fallbackDecision("I had trouble forming a response — could you rephrase that?"));
     }
     decision = response.output;
+    if (decision.safetyConcern === "urgent") return finish(decision);
 
     // One repair round: if the proposal doesn't satisfy the tool schema, tell
     // the model exactly what was wrong and let it try again.

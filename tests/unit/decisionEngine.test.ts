@@ -25,6 +25,7 @@ const decision: AgentDecision = {
   summary: "A response",
   evidenceIds: [],
   nextStep: "None",
+  safetyConcern: "none",
   proposedAction: null,
   requiresApproval: false,
   clarifyingQuestion: null,
@@ -106,5 +107,28 @@ describe("decide telemetry", () => {
     expect(generate).toHaveBeenCalledTimes(2);
     expect(result.decision.proposedAction?.parameters).toMatchObject({ message: "How is it going?" });
     expect(result.meta).toMatchObject({ repaired: true, degraded: false, usage: { inputTokens: 17, outputTokens: 7 } });
+  });
+
+  it("does not make a repair call for an urgent decision", async () => {
+    generate.mockResolvedValue({
+      output: {
+        ...decision,
+        safetyConcern: "urgent",
+        proposedAction: {
+          actionType: "SCHEDULE_CHECKIN",
+          parameters: {},
+          reason: "Follow up",
+          riskLevel: "low",
+          requiresApproval: false,
+        },
+      },
+      usage: { inputTokens: 10, outputTokens: 4 },
+    });
+
+    const result = await decide(request);
+
+    expect(result.decision.safetyConcern).toBe("urgent");
+    expect(result.meta.repaired).toBe(false);
+    expect(generate).toHaveBeenCalledTimes(1);
   });
 });

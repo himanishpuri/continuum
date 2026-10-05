@@ -30,6 +30,7 @@ function simpleQueryDecision(context: AgentContext): AgentDecision {
     summary,
     evidenceIds: plan ? ["current_plan_duration", "streak"] : [],
     nextStep: "None needed.",
+    safetyConcern: "none",
     proposedAction: null,
     requiresApproval: false,
     clarifyingQuestion: null,
@@ -44,6 +45,7 @@ function clarifyingDecision(question: string): AgentDecision {
     summary: "I want to make sure I understand before suggesting anything.",
     evidenceIds: [],
     nextStep: "Ask a clarifying question.",
+    safetyConcern: "none",
     proposedAction: null,
     requiresApproval: false,
     clarifyingQuestion: question,
@@ -58,6 +60,7 @@ function generalDecision(): AgentDecision {
     summary: "I'm here to help with your routines, scheduling, and wellbeing planning. Let me know what you'd like to work on.",
     evidenceIds: [],
     nextStep: "Await further detail from the user.",
+    safetyConcern: "none",
     proposedAction: null,
     requiresApproval: false,
     clarifyingQuestion: "What would you like help with — your routine, schedule, or something else?",
@@ -85,6 +88,7 @@ export function adherenceDecision(context: AgentContext): AgentDecision {
       summary: "You don't have an active plan yet, so there's nothing to compare against. Tell me about the routine you'd like help with and I can propose a starting plan.",
       evidenceIds: [],
       nextStep: "Propose an initial plan once the user describes their goal.",
+      safetyConcern: "none",
       proposedAction: null,
       requiresApproval: false,
       clarifyingQuestion: "What routine or goal would you like help staying consistent with?",
@@ -106,6 +110,7 @@ export function adherenceDecision(context: AgentContext): AgentDecision {
       summary: `Your ${currentBucket.durationMinutes}-minute sessions already have your best completion rate (${pct(currentBucket.completionRate)}) — you're on the right plan. I'd recommend keeping this week's sessions as-is.`,
       evidenceIds,
       nextStep: checkinPending ? "Keep the current plan; a check-in is already scheduled." : "Keep the current plan; schedule a confirmation check-in.",
+      safetyConcern: "none",
       proposedAction: checkinPending
         ? null
         : {
@@ -132,6 +137,7 @@ export function adherenceDecision(context: AgentContext): AgentDecision {
       summary: `Your overall completion rate over the last 30 days is ${pct(progress.completionRate)}, and it isn't clearly tied to session length yet. Rather than guess at a change, I'd like to see how a few more sessions go first.`,
       evidenceIds,
       nextStep: checkinPending ? "Wait for more session data; a check-in is already scheduled." : "Schedule a check-in to gather more data before recommending a change.",
+      safetyConcern: "none",
       proposedAction: checkinPending
         ? null
         : {
@@ -160,6 +166,7 @@ export function adherenceDecision(context: AgentContext): AgentDecision {
     summary: `I noticed something useful: your ${best.durationMinutes}-minute sessions have a ${pct(best.completionRate)} completion rate, compared to ${currentPct} for your current ${plan.durationMinutes}-minute sessions. Shorter sessions at your preferred time seem to work much better for you.`,
     evidenceIds,
     nextStep: "Propose changing session duration to the better-performing length.",
+    safetyConcern: "none",
     proposedAction: {
       actionType: "MODIFY_PLAN",
       parameters: {

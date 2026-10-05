@@ -134,6 +134,13 @@ export async function sendAgentMessage(userId: string, message: string, conversa
       resultSummary: SAFETY_RESPONSE,
       completedAt: new Date().toISOString(),
     });
+    await repos.events.create(userId, {
+      type: "AGENT_COMPLETED",
+      timestamp: new Date().toISOString(),
+      source: "agent",
+      payload: { runId: run.id, safety: true, layer: "keyword" },
+      summary: "Responded with safety resources",
+    });
     return { conversationId: conversation.id, runId: run.id, message: agentMessage, pendingApproval: null, steps };
   }
 
@@ -149,6 +156,33 @@ export async function sendAgentMessage(userId: string, message: string, conversa
       ...context.retrievedSteps.map((label) => ({ label, completedAt: new Date().toISOString() })),
       ...turn.steps.map((label) => ({ label, completedAt: new Date().toISOString() })),
     ];
+
+    if (decision.safetyConcern === "urgent") {
+      steps.push({ label: "Detected a safety-sensitive message", completedAt: new Date().toISOString() });
+      const agentMessage = await repos.conversations.addMessage(userId, conversation.id, {
+        role: "agent",
+        content: SAFETY_RESPONSE,
+        cards: [],
+        createdAt: new Date().toISOString(),
+        metadata: { runId: run.id },
+      });
+      await repos.conversations.update(userId, conversation.id, { updatedAt: new Date().toISOString() });
+      await repos.agentRuns.update(userId, run.id, {
+        status: "completed",
+        safetyStop: true,
+        steps,
+        resultSummary: SAFETY_RESPONSE,
+        completedAt: new Date().toISOString(),
+      });
+      await repos.events.create(userId, {
+        type: "AGENT_COMPLETED",
+        timestamp: new Date().toISOString(),
+        source: "agent",
+        payload: { runId: run.id, safety: true, layer: "model" },
+        summary: "Responded with safety resources",
+      });
+      return { conversationId: conversation.id, runId: run.id, message: agentMessage, pendingApproval: null, steps };
+    }
 
     let actionRecord: AgentAction | null = null;
     let denialReason: string | null = null;
@@ -216,6 +250,7 @@ export async function sendAgentMessage(userId: string, message: string, conversa
         usage: turn.meta.usage,
         degraded: turn.meta.degraded,
       }),
+      ...(turn.meta?.degraded && { error: turn.meta.error ?? "Model call degraded" }),
       latencyMs,
       intent: intent.intent,
       confidence: decision.confidence,

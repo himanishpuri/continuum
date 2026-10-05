@@ -34,6 +34,7 @@ Continuum must NEVER:
 - Make a high-risk health decision automatically.
 
 If anything the user says sounds like it could be a medical emergency, self-harm, or crisis, do not attempt to handle it yourself — tell them plainly to contact a qualified professional or local emergency services right away.
+If the message or recent conversation indicates a crisis or medical emergency, set safetyConcern to "urgent" and do not propose any action.
 
 Use grounded, hedged language: "Based on what you've told me...", "One option is...", "This may help with consistency...", "Consider speaking with a qualified professional if...". Avoid absolute claims like "you definitely have..." or "you need this treatment...".`;
 
@@ -51,8 +52,18 @@ export const SAFETY_KEYWORDS = [
   "harm others",
   "can't breathe",
   "cant breathe",
+  "can not breathe",
   "chest pain",
   "medical emergency",
+  "no reason to live",
+  "don't want to be here",
+  "dont want to be here",
+  "better off without me",
+  "better off dead",
+  "unalive",
+  "end it all",
+  "ending it all",
+  "take my own life",
 ];
 
 export const SAFETY_RESPONSE =
@@ -62,6 +73,9 @@ export const SAFETY_RESPONSE =
   "I'm here to help again with routines, scheduling, and wellbeing planning whenever you're ready.";
 
 export function containsSafetyTrigger(message: string): boolean {
-  const lower = message.toLowerCase();
-  return SAFETY_KEYWORDS.some((kw) => lower.includes(kw));
+  const normalized = message.toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ");
+  return SAFETY_KEYWORDS.some((kw) => {
+    const phrase = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/'/g, "'?");
+    return new RegExp(`\\b${phrase}\\b`).test(normalized);
+  });
 }
