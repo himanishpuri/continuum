@@ -55,7 +55,9 @@ export default function ActivityPage() {
           <p>Tokens per measured turn: {metricsQuery.data.metrics.tokensPerTurn === null ? "No data" : Math.round(metricsQuery.data.metrics.tokensPerTurn)}</p>
           <p>Latest confidence: {metricsQuery.data.metrics.confidenceTrend.latest === null ? "No rating" : `${metricsQuery.data.metrics.confidenceTrend.latest}/10`}</p>
           {metricsQuery.data.metrics.postInterventionAdherence.length > 0 && <p className="sm:col-span-2 lg:col-span-3">
-            Last plan change, 14-day completion: {formatRate(metricsQuery.data.metrics.postInterventionAdherence.at(-1)!.beforeRate)} before → {formatRate(metricsQuery.data.metrics.postInterventionAdherence.at(-1)!.afterRate)} after
+            {metricsQuery.data.metrics.postInterventionAdherence.at(-1)!.beforeRate === null && metricsQuery.data.metrics.postInterventionAdherence.at(-1)!.afterRate === null
+              ? "Last plan change: not enough session history yet (needs logged sessions in the 14 days before and after)."
+              : <>Last plan change, 14-day completion: {formatRate(metricsQuery.data.metrics.postInterventionAdherence.at(-1)!.beforeRate)} before → {formatRate(metricsQuery.data.metrics.postInterventionAdherence.at(-1)!.afterRate)} after</>}
           </p>}
         </div>}
       </Card>
