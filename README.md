@@ -52,7 +52,9 @@ they enter the agent's context. Activity includes per-user agent insights.
 
 Every one of those steps is backed by a real, inspectable record: a
 plan version, a memory, an audit event, a scheduled check-in. Nothing in
-the UI claims something happened that didn't.
+the UI claims something happened that didn't. If the model's reply
+describes a pending proposal as already done, Continuum appends "Nothing
+has changed yet — approve it below to apply." and flags the run.
 
 ## Tech stack
 
@@ -212,6 +214,12 @@ Covers (see `tests/unit` and `tests/integration`):
   retry behavior, ownership checks, and confidence-based smaller steps.
 - **Agent metrics** — approval, degradation, safety, latency, token, confidence,
   and 14-day post-change adherence calculations.
+- **Safety** — keyword matching across curly apostrophes and paraphrases,
+  no false positives on phrases like "killing it at the gym," and the
+  model-flagged safety stop.
+- **Reply truthfulness** — `claimsCompletedChange` detects replies that
+  describe a pending proposal as done, and the agent adds the
+  approval reminder.
 - **Auth isolation** — the repository layer never returns or mutates
   another user's data.
 - **Progress** — session duration rates, streaks, empty logs, and multiple
@@ -250,8 +258,9 @@ npm run vercel:env         # scripts/vercel-env.sh — pushes .env / .env.local 
 npx vercel --prod
 ```
 
-Then add `<your-project>.vercel.app` to Firebase Auth → **Authorized
-domains**, and `curl https://<your-project>.vercel.app/api/health`.
+Then add every domain users sign in from (the `vercel.app` domain and any
+custom domain, e.g. `continuum.himanishpuri.dev`) to Firebase Auth →
+**Authorized domains**, and `curl https://<your-domain>/api/health`.
 
 ## Security model
 
@@ -342,9 +351,7 @@ parameters can trigger one repair call (`src/ai/agent/decisionEngine.ts`).
 
 ## Future improvements
 
-- A dedicated open-weight safety and intent classifier as a third layer
-  (the user's note calls these "open weight versions of Jev, the system 1
-  model"; the model name still needs confirmation).
+- A dedicated open-weight safety/intent classifier as a third safety layer.
 - Genkit-to-OpenTelemetry export when Blaze/GCP billing is available.
 - Wearable signals and just-in-time adaptive intervention (JITAI) timing.
 - A post-hoc review tier for small, reversible plan changes under the
