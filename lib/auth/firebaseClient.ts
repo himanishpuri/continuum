@@ -7,7 +7,6 @@ import {
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signOut as firebaseSignOut,
 } from "firebase/auth";
 
 const config: FirebaseOptions = {
@@ -44,10 +43,4 @@ export async function signUpWithEmail(email: string, password: string): Promise<
   const auth = getAuth(getClientApp());
   const result = await createUserWithEmailAndPassword(auth, email, password);
   return result.user.getIdToken();
-}
-
-export async function signOutClient(): Promise<void> {
-  if (!isFirebaseClientConfigured()) return;
-  const auth = getAuth(getClientApp());
-  await firebaseSignOut(auth);
 }

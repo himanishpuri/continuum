@@ -3,10 +3,9 @@ import { requireApiUser } from "@/lib/auth/apiAuth";
 import { runDueCheckinsForUser } from "@/lib/background/runDueCheckins";
 
 /**
- * §23: local stand-in for the Cloud Scheduler → Cloud Tasks → Cloud Run
- * production path, scoped to the signed-in user so the demo can trigger
- * background evaluation on demand instead of waiting for a real schedule.
- * Runs the identical logic POST /api/cron/run-due-checkins uses in
+ * §23: local stand-in for the Vercel Cron production path, scoped to the
+ * signed-in user so the demo can trigger background evaluation on demand.
+ * Runs the identical logic GET /api/cron/run-due-checkins uses in
  * production (lib/background/runDueCheckins.ts) — nothing here is faked.
  */
 export async function POST() {

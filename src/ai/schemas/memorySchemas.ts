@@ -25,5 +25,3 @@ export const MemoryCandidateSchema = z.object({
     .describe("null for a durable fact, a number of days for something time-bound."),
 });
 export type MemoryCandidate = z.infer<typeof MemoryCandidateSchema>;
-
-export const MemoryCandidateListSchema = z.array(MemoryCandidateSchema);

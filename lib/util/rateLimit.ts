@@ -1,10 +1,9 @@
 /**
  * Minimal in-process sliding-window rate limiter keyed by user id.
  *
- * Scope: this app runs as a single Vercel function instance / one Cloud Run
- * container at the scale it targets, so an in-memory map is sufficient. It does
- * NOT coordinate across instances — move to Firestore / Redis if the deployment
- * is ever scaled out.
+ * Scope: this in-memory map limits requests within one Vercel function
+ * instance. It does NOT coordinate across instances — use shared storage
+ * such as Firestore or Redis for a deployment-wide limit.
  *
  * Memory: a hard cap evicts the least-recently-touched key (the map preserves
  * insertion order), so it can't grow without bound as distinct users accumulate.
