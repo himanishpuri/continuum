@@ -183,7 +183,14 @@ export interface AgentRun {
   trigger: "user_message" | "background_checkin";
   input: string;
   status: AgentRunStatus;
-  provider: "gemini" | "demo";
+  provider: "gemini" | "demo" | "rules";
+  model?: string;
+  latencyMs?: number;
+  usage?: { inputTokens: number; outputTokens: number };
+  degraded?: boolean;
+  intent?: string;
+  confidence?: number;
+  safetyStop?: boolean;
   steps: AgentRunStep[];
   planSummary: string | null;
   actions: AgentRunActionRef[];

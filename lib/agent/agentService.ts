@@ -129,6 +129,7 @@ export async function sendAgentMessage(userId: string, message: string, conversa
     });
     await repos.agentRuns.update(userId, run.id, {
       status: "completed",
+      safetyStop: true,
       steps,
       resultSummary: SAFETY_RESPONSE,
       completedAt: new Date().toISOString(),
@@ -139,7 +140,9 @@ export async function sendAgentMessage(userId: string, message: string, conversa
   try {
     const context = await buildAgentContext(userId);
     const intent = classifyIntent(message);
+    const providerStartedAt = Date.now();
     const turn = await provider.handleMessage({ userId, message, history, context, intent });
+    const latencyMs = turn.meta?.latencyMs ?? Date.now() - providerStartedAt;
     const decision = turn.decision;
 
     const steps: AgentRunStep[] = [
@@ -208,6 +211,14 @@ export async function sendAgentMessage(userId: string, message: string, conversa
 
     await repos.agentRuns.update(userId, run.id, {
       status: "completed",
+      ...(turn.meta && {
+        model: turn.meta.model,
+        usage: turn.meta.usage,
+        degraded: turn.meta.degraded,
+      }),
+      latencyMs,
+      intent: intent.intent,
+      confidence: decision.confidence,
       steps,
       planSummary: decision.proposedAction ? decision.summary : null,
       actions: actionRecord ? [{ actionId: actionRecord.id, type: actionRecord.type, status: actionRecord.status }] : [],
@@ -242,6 +253,7 @@ export async function sendAgentMessage(userId: string, message: string, conversa
     });
     await repos.agentRuns.update(userId, run.id, {
       status: "failed",
+      latencyMs: Date.now() - new Date(startedAt).getTime(),
       error: errorMessage,
       resultSummary: fallbackText,
       completedAt: new Date().toISOString(),

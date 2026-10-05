@@ -12,17 +12,20 @@ export interface CheckinRunResult {
 }
 
 /**
- * §23: the production entry point is Cloud Scheduler → Cloud Run hitting
- * POST /api/cron/run-due-checkins, which calls this for every user. Locally,
- * POST /api/dev/run-due-checkins calls the same function directly so the
- * demo can simulate background execution without any scheduler infra.
+ * §23: Vercel Cron calls GET /api/cron/run-due-checkins, which runs this
+ * for every user. Locally, POST /api/dev/run-due-checkins calls
+ * runDueCheckinsForUser for the signed-in user on demand.
  */
 export async function runDueCheckinsForAllUsers(now: Date = new Date()): Promise<CheckinRunResult[]> {
   const repos = getRepositories();
   const userIds = await repos.listUserIds();
   const results: CheckinRunResult[] = [];
   for (const userId of userIds) {
-    results.push(...(await runDueCheckinsForUser(userId, now)));
+    try {
+      results.push(...(await runDueCheckinsForUser(userId, now)));
+    } catch (err) {
+      console.error("Background check-in failed for user", userId, err);
+    }
   }
   return results;
 }
@@ -126,7 +129,7 @@ async function evaluateCheckin(
     trigger: "background_checkin",
     input: checkin.message,
     status: "completed",
-    provider: "demo",
+    provider: "rules", // Deterministic evaluator; no model is called.
     steps: steps.map((label) => ({ label, completedAt: now.toISOString() })),
     planSummary: null,
     actions: [],

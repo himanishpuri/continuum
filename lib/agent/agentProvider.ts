@@ -1,5 +1,6 @@
 import type { AgentContext } from "@/src/ai/agent/context";
 import type { AgentDecision, IntentClassification } from "@/src/ai/schemas/agentSchemas";
+import type { DecisionMeta } from "@/src/ai/agent/decisionEngine";
 import type { ConversationMessage } from "@/lib/types";
 
 export interface AgentTurnInput {
@@ -13,6 +14,7 @@ export interface AgentTurnInput {
 
 export interface AgentTurnResult {
   decision: AgentDecision;
+  meta?: DecisionMeta;
   /** Extra human-readable step labels beyond context retrieval, shown in the Agent Run UI (§9). */
   steps: string[];
 }

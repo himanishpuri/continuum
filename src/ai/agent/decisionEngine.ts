@@ -12,6 +12,15 @@ export interface DecisionRequest {
   intent: IntentClassification;
 }
 
+export interface DecisionMeta {
+  model: string;
+  latencyMs: number;
+  usage: { inputTokens: number; outputTokens: number };
+  repaired: boolean;
+  degraded: boolean;
+  error?: string;
+}
+
 const MAX_HISTORY_TURNS = 12;
 
 function renderHistory(history: ConversationMessage[]): string {
@@ -63,7 +72,16 @@ function clarificationRounds(history: ConversationMessage[]): number {
  * decision back, and the policy engine (lib/policy/policyEngine.ts) makes
  * the real allow/approve call downstream regardless of what the model set.
  */
-export async function decide(request: DecisionRequest): Promise<AgentDecision> {
+export async function decide(request: DecisionRequest): Promise<{ decision: AgentDecision; meta: DecisionMeta }> {
+  const startedAt = Date.now();
+  const meta: DecisionMeta = {
+    model: process.env.GEMINI_MODEL || "gemini-3.5-flash",
+    latencyMs: 0,
+    usage: { inputTokens: 0, outputTokens: 0 },
+    repaired: false,
+    degraded: false,
+  };
+  const finish = (decision: AgentDecision) => ({ decision, meta: { ...meta, latencyMs: Date.now() - startedAt } });
   const rounds = clarificationRounds(request.history);
   const basePrompt = [
     buildContextBlock(request.context),
@@ -84,14 +102,23 @@ export async function decide(request: DecisionRequest): Promise<AgentDecision> {
     .filter(Boolean)
     .join("\n");
 
-  const generate = (prompt: string) =>
-    ai.generate({
-      model: getGeminiModel(),
+  const generate = async (prompt: string) => {
+    const requestedModel = getGeminiModel();
+    meta.model = requestedModel.name;
+    const response = await ai.generate({
+      model: requestedModel,
       system: SYSTEM_PROMPT,
       prompt,
       output: { schema: AgentDecisionSchema },
       use: generationMiddleware,
     });
+    meta.usage.inputTokens += response.usage?.inputTokens ?? 0;
+    meta.usage.outputTokens += response.usage?.outputTokens ?? 0;
+    // The Google GenAI plugin places the raw Gemini response in custom.
+    const servedModel = (response.custom as { modelVersion?: unknown } | undefined)?.modelVersion;
+    if (typeof servedModel === "string") meta.model = servedModel;
+    return response;
+  };
 
   // Returns null if valid (mutating parameters to the parsed form), or a
   // human-readable description of what's wrong with the proposed action.
@@ -110,13 +137,18 @@ export async function decide(request: DecisionRequest): Promise<AgentDecision> {
   let decision: AgentDecision;
   try {
     const response = await generate(basePrompt);
-    if (!response.output) return fallbackDecision("I had trouble forming a response — could you rephrase that?");
+    if (!response.output) {
+      meta.degraded = true;
+      meta.error = "Model returned no output";
+      return finish(fallbackDecision("I had trouble forming a response — could you rephrase that?"));
+    }
     decision = response.output;
 
     // One repair round: if the proposal doesn't satisfy the tool schema, tell
     // the model exactly what was wrong and let it try again.
     const problem = validateProposal(decision);
     if (problem && decision.proposedAction) {
+      meta.repaired = true;
       const retry = await generate(
         `${basePrompt}\n\nYOUR PREVIOUS proposedAction FOR ${decision.proposedAction.actionType} WAS REJECTED: ${problem}\n` +
           "Re-answer with a valid proposedAction that fills every required parameter, or set proposedAction to null and ask one specific question."
@@ -125,20 +157,22 @@ export async function decide(request: DecisionRequest): Promise<AgentDecision> {
     }
   } catch (err) {
     console.error("Gemini decision call failed", err);
-    return fallbackDecision("I'm having trouble reaching my reasoning engine right now — could you try again in a moment?");
+    meta.degraded = true;
+    meta.error = err instanceof Error ? err.message : String(err);
+    return finish(fallbackDecision("I'm having trouble reaching my reasoning engine right now — could you try again in a moment?"));
   }
 
   // Final guard: if a proposed action still doesn't validate, drop it but keep a useful question.
   if (validateProposal(decision) && decision.proposedAction) {
-    return {
+    return finish({
       ...decision,
       proposedAction: null,
       requiresApproval: false,
       clarifyingQuestion:
         decision.clarifyingQuestion ??
         "I have most of what I need but not quite enough to set this up cleanly — could you restate the goal, days, and time in one line?",
-    };
+    });
   }
 
-  return decision;
+  return finish(decision);
 }
