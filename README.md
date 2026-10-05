@@ -42,6 +42,13 @@ routine," and it will:
    event, and schedule a follow-up check-in.
 6. Later, a scheduled job evaluates your progress, asks whether the
    schedule still works after a severe drop, or records that no change is needed.
+   With reminders enabled and Web Push configured, it sends the result to
+   registered devices. You can answer with a 0–10 confidence rating and note.
+
+Plans keep their full version history. You can restore an earlier version
+from the Plans page; the restore creates a new version attributed to you.
+Agent-suggested memories wait on the Memory page for your review before
+they enter the agent's context. Activity includes per-user agent insights.
 
 Every one of those steps is backed by a real, inspectable record: a
 plan version, a memory, an audit event, a scheduled check-in. Nothing in
@@ -61,6 +68,7 @@ the UI claims something happened that didn't.
 - **Background execution:** Vercel Cron calls a guarded GET endpoint daily;
   a demo-only POST endpoint runs check-ins for the signed-in user locally.
 - **Testing:** Vitest (unit + integration).
+- **Delivery:** Web Push using VAPID keys and a service worker.
 
 See [`docs/architecture.md`](docs/architecture.md) for diagrams of the
 system, the agent's internal lifecycle, memory, the approval workflow,
@@ -85,6 +93,7 @@ npm run lint        # ESLint
 npm run typecheck   # tsc --noEmit
 npm test            # Vitest
 npm run build       # production build (also type-checks)
+npm run eval        # live Gemini scenarios and coaching judge; use a separate key
 ```
 
 ## Demo mode
@@ -164,6 +173,17 @@ var to an empty string to disable fallback.
    Firestore (`lib/repositories/index.ts`) once Admin credentials are
    present.
 
+## Enabling check-in push notifications
+
+Generate VAPID keys with `npx web-push generate-vapid-keys`. Set
+`NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`
+(for example `mailto:you@example.com`) in `.env.local` or Vercel. The
+public key is browser-visible; keep the private key server-side. The
+`npm run vercel:env` script pushes these variables. In Settings, enable
+"Notifications on this device" in each browser you want to receive them.
+The separate Reminders preference remains the server-side gate. On iOS,
+install the app to the Home Screen first.
+
 ## Testing
 
 ```bash
@@ -187,13 +207,24 @@ Covers (see `tests/unit` and `tests/integration`):
   `DemoAgentProvider`.
 - **Background check-ins** — one missed session out of five doesn't
   trigger an intervention; a severe adherence drop does, and schedules a
-  follow-up.
+  follow-up. Push tests cover delivery and expired-device pruning.
+- **Plan restore and check-in replies** — full snapshots, user attribution,
+  retry behavior, ownership checks, and confidence-based smaller steps.
+- **Agent metrics** — approval, degradation, safety, latency, token, confidence,
+  and 14-day post-change adherence calculations.
 - **Auth isolation** — the repository layer never returns or mutates
   another user's data.
 - **Progress** — session duration rates, streaks, empty logs, and multiple
   sessions on the same day.
 - **Security utilities** — timing-safe string comparison, per-key rate
   limiting, and session timestamp bounds.
+
+The separate live suite (`npm run eval`) runs eight Gemini scenarios and
+an MITI-inspired coaching judge, writing JSON reports under
+`evals/results/`. It skips without a key. Use `EVAL_GEMINI_API_KEY` with a
+separate key from the deployed app: a full run makes multiple model and
+judge calls and can consume the free tier's daily quota. The suite uses
+`.demo-data-eval/` and local storage, regardless of Firebase credentials.
 
 ## Deployment
 
@@ -233,8 +264,10 @@ domains**, and `curl https://<your-project>.vercel.app/api/health`.
   to lock down piecemeal.
 - **Tool execution is gated, not model-driven.** Gemini (or the demo
   provider) proposes *one* structured action at most; `policyEngine.ts`
-  is the sole authority on whether it's allowed and whether it needs
+  decides whether agent proposals are allowed and whether they need
   approval — the model's own `requiresApproval` field is advisory only.
+  A user-clicked plan restore carries explicit consent through the same
+  action ledger.
   `HIGH_RISK_HEALTH_ACTION` is unconditionally prohibited.
 - **Idempotency** — every `AgentAction` carries an `idempotencyKey`;
   `toolExecutor.ts` looks up a prior completed action with the same key
@@ -250,10 +283,16 @@ domains**, and `curl https://<your-project>.vercel.app/api/health`.
   changes, external messages, and memory deletion require user approval.
 - **Safety boundary** — a deterministic keyword guard
   (`src/ai/agent/prompts.ts`) intercepts clearly urgent/self-harm
-  language before it ever reaches the model, returning a fixed
-  safety-resources message.
+  language before it ever reaches the model; a second model-flag layer
+  catches urgent paraphrases. Both return the same fixed safety-resources
+  message and record a safety stop.
+- **Memory review** — agent-inferred memories stay pending and excluded
+  from context until you confirm them. Updates to trusted memories need
+  approval.
+- **Push endpoints** — subscription URLs are restricted to known HTTPS
+  push services; expired endpoints are pruned after 404/410 responses.
 - Secrets (`GEMINI_API_KEY`, `FIREBASE_PRIVATE_KEY`, `SESSION_SECRET`,
-  `CRON_SECRET`) are read only from server-side env vars, never bundled
+  `CRON_SECRET`, `VAPID_PRIVATE_KEY`) are read only from server-side env vars, never bundled
   to the client. The cron endpoint compares the Bearer value with
   `timingSafeEqualStr`.
 - HTTP security headers (`X-Frame-Options`, `X-Content-Type-Options`,
@@ -266,7 +305,7 @@ domains**, and `curl https://<your-project>.vercel.app/api/health`.
 Firestore-shaped collections under `users/{uid}` (mirrored 1:1 by the
 local JSON store): `memories`, `plans`, `planVersions`, `events` (doubles
 as both the behavioral log the progress engine reads and the audit trail
-the Activity page renders), `agentRuns`, `actions`, `checkins`,
+the Activity page renders), `agentRuns`, `actions`, `checkins`, `pushSubscriptions`,
 `conversations/{id}/messages`. See `lib/types.ts` for the full shape of
 every entity and `lib/repositories/types.ts` for the repository
 interfaces both backends implement identically.
@@ -303,8 +342,11 @@ parameters can trigger one repair call (`src/ai/agent/decisionEngine.ts`).
 
 ## Future improvements
 
-Agent run replay, memory-confidence visualization, a plan comparison
-view, a dedicated "why did you recommend this?" panel beyond the inline
-evidence list, a simulation / time-travel mode for demos, richer activity
-filtering, a dark-mode toggle (currently follows OS preference only), and
-keyboard shortcuts.
+- A dedicated open-weight safety and intent classifier as a third layer
+  (the user's note calls these "open weight versions of Jev, the system 1
+  model"; the model name still needs confirmation).
+- Genkit-to-OpenTelemetry export when Blaze/GCP billing is available.
+- Wearable signals and just-in-time adaptive intervention (JITAI) timing.
+- A post-hoc review tier for small, reversible plan changes under the
+  "autonomous" setting.
+- Agent run replay, a plan comparison view, and richer activity filtering.

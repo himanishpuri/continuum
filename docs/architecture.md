@@ -23,6 +23,8 @@ flowchart TD
     Cron[Vercel Cron<br/>daily 08:00 UTC] -->|GET + Authorization: Bearer| CronRoute["/api/cron/run-due-checkins"]
     CronRoute --> Background[Background check-in evaluator<br/>lib/background/runDueCheckins.ts]
     Background --> Data
+    Background -->|reminderEnabled + device subscription| Push[Web Push service]
+    Push --> SW[Browser service worker]
 ```
 
 The UI and route handlers run on Vercel. `AgentProvider` selects Gemini or
@@ -48,7 +50,8 @@ stateDiagram-v2
     POLICY --> MEMORY: denied
     PENDING --> MEMORY
     EXECUTE --> MEMORY: toolExecutor
-    MEMORY --> RESPOND: verify candidates and propose CREATE_MEMORY actions
+    MEMORY --> REVIEW: verify candidates and queue pending memories
+    REVIEW --> RESPOND: user confirms or dismisses later
     RESPOND --> DONE: persist agent message and AgentRun result
     DONE --> [*]
 ```
@@ -79,13 +82,17 @@ flowchart LR
     EvidenceEngine --> Context
     Context --> Decision[AgentDecision]
     Decision -->|memoryCandidates| Verifier[verifier.ts:<br/>confidence floor + dedup]
-    Verifier -->|qualifying candidates only| SEM
+    Verifier -->|qualifying candidates only| Pending[Pending review queue]
+    Pending -->|user confirms on Memory page| SEM
+    Pending -->|user dismisses or expiry| Discarded[Discarded]
 ```
 
 Memory is never handed to the model unfiltered: `retrieveRelevantMemories`
-ranks by a confidence/recency score and caps how much comes back, and only
-memory candidates that clear the verifier's confidence and duplicate
-checks are ever persisted.
+ranks active memories by confidence and recency and caps the result.
+Agent-inferred candidates that pass the verifier enter a pending queue;
+they are excluded from context until the user confirms them. Pending
+suggestions expire after 14 days if left unreviewed. Updates to trusted
+memories need approval.
 
 ## 4. Approval workflow
 
@@ -101,11 +108,20 @@ flowchart TD
     AutoExec --> Exec
     Exec -->|success| Completed[COMPLETED<br/>+ audit event, e.g. PLAN_UPDATED]
     Exec -->|throws| Failed[FAILED<br/>+ AGENT_FAILED event, no partial state]
+    PendingMemory[Agent memory suggestion] --> MemoryQueue[Pending memory review]
+    MemoryQueue -->|user confirms| ActiveMemory[Active memory]
+    MemoryQueue -->|user dismisses| Dismissed[Deleted]
+    Version[Earlier plan version] -->|user clicks Restore| Revert[User-initiated MODIFY_PLAN]
+    Revert --> Exec
+    Exec --> NewVersion[New plan version, createdBy user]
 ```
 
 The model's own `requiresApproval` guess is never trusted — the policy
 engine's decision is authoritative and cannot be overridden by anything
-the model returns.
+the model returns. A restore click is a separate user-initiated action:
+it carries the user's consent, passes through the same idempotent executor,
+and bypasses only the agent's autonomy and plan-edit permission settings.
+High-risk health actions remain prohibited.
 
 ## 5. Background execution
 
@@ -115,6 +131,8 @@ sequenceDiagram
     participant Cron as GET /api/cron/run-due-checkins
     participant Job as runDueCheckinsForAllUsers
     participant Data as Firestore/local store
+    participant Push as Web Push
+    participant SW as Browser service worker
 
     Scheduler->>Cron: HTTP GET + Authorization: Bearer CRON_SECRET
     Cron->>Cron: timingSafeEqualStr on Bearer value
@@ -131,6 +149,11 @@ sequenceDiagram
             Job->>Data: mark check-in completed, no change
         end
         Job->>Data: write CHECKIN_COMPLETED event + AgentRun (background_checkin)
+        opt user has reminders enabled
+            Job->>Push: send to each registered device
+            Push->>SW: show notification with /dashboard#checkin
+            Job->>Data: MESSAGE_SENT only if a device accepted
+        end
     end
     Cron-->>Scheduler: 200 { results, count }
 ```
@@ -138,6 +161,10 @@ sequenceDiagram
 Locally, `POST /api/dev/run-due-checkins` (gated to `DEMO_MODE=true`, scoped
 to the signed-in user) calls the exact same `runDueCheckinsForUser`
 function the cron route uses for each user.
+The Dashboard displays the latest completed check-in and accepts one
+confidence rating (0–10) plus an optional note. The latest self-report
+enters the next agent context; a low rating can bias the demo agent toward
+a smaller step when completion-rate evidence is borderline.
 
 ## 6. Request sequence — a chat message end to end
 
