@@ -8,6 +8,7 @@ import { LoadingState, ErrorState } from "@/components/ui/States";
 import { Card, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { PushControls } from "@/components/settings/PushControls";
 import type { AgentPermissions, AutonomyLevel, CommunicationStyle, UserRecord } from "@/lib/types";
 
 function SectionSaveNote({ saved }: { saved: boolean }) {
@@ -145,6 +146,8 @@ export default function SettingsPage() {
           Save preferences
         </Button>
       </Card>
+
+      <PushControls />
 
       <Card>
         <CardHeader>

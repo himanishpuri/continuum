@@ -8,6 +8,7 @@ import { createFirestoreEventsRepository } from "./eventsRepository";
 import { createFirestoreAgentRunsRepository } from "./agentRunsRepository";
 import { createFirestoreActionsRepository } from "./actionsRepository";
 import { createFirestoreCheckinsRepository } from "./checkinsRepository";
+import { createFirestorePushSubscriptionsRepository } from "./pushSubscriptionsRepository";
 import { createFirestoreConversationsRepository } from "./conversationsRepository";
 
 export function createFirestoreRepositories(): Repositories {
@@ -20,6 +21,7 @@ export function createFirestoreRepositories(): Repositories {
     agentRuns: createFirestoreAgentRunsRepository(),
     actions: createFirestoreActionsRepository(),
     checkins: createFirestoreCheckinsRepository(),
+    pushSubscriptions: createFirestorePushSubscriptionsRepository(),
     conversations: createFirestoreConversationsRepository(),
     async listUserIds() {
       const snap = await getAdminFirestore().collection("users").listDocuments();

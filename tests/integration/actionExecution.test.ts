@@ -2,41 +2,10 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { getRepositories } from "@/lib/repositories";
 import { approveAction, proposeAction, rejectAction } from "@/lib/tools/actionService";
-import type { AgentPermissions, Plan } from "@/lib/types";
-
-const permissions: AgentPermissions = {
-  canCreateReminders: true,
-  canModifyPlans: true,
-  canScheduleFollowups: true,
-  requireApprovalForExternalActions: true,
-};
+import { permissions, seedUserWithPlan } from "@/tests/fixtures/seed";
 
 function uid() {
   return `test-action-${randomUUID()}`;
-}
-
-async function seedUserWithPlan(userId: string): Promise<Plan> {
-  const repos = getRepositories();
-  const now = new Date().toISOString();
-  await repos.users.createUser({
-    profile: { uid: userId, name: "Test", email: null, timezone: "UTC", createdAt: now, isDemo: true },
-    preferences: { preferredSessionTime: "19:00", preferredDurationMinutes: 15, communicationStyle: "supportive", reminderEnabled: true },
-    settings: { autonomyLevel: "balanced", permissions, geminiModel: "gemini-flash-latest" },
-  });
-  return repos.plans.create(userId, {
-    title: "Test Plan",
-    goal: "Test",
-    description: "",
-    schedule: { daysOfWeek: [1, 2, 3, 4, 5], time: "19:00" },
-    durationMinutes: 30,
-    frequencyLabel: "Mon-Fri",
-    status: "active",
-    version: 1,
-    successMetrics: [],
-    checkinFrequencyDays: 7,
-    createdAt: now,
-    updatedAt: now,
-  });
 }
 
 describe("action execution & idempotency", () => {

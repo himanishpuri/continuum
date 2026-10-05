@@ -40,34 +40,35 @@ routine," and it will:
 4. Propose a concrete plan change and ask for your approval.
 5. On approval, actually update your plan (versioned), log an audit
    event, and schedule a follow-up check-in.
-6. Later — via a real background job — evaluate your progress and either
-   adapt the plan again or decide no intervention is needed.
+6. Later, a scheduled job evaluates your progress, asks whether the
+   schedule still works after a severe drop, or records that no change is needed.
+   With reminders enabled and Web Push configured, it sends the result to
+   registered devices. You can answer with a 0–10 confidence rating and note.
+
+Plans keep their full version history. You can restore an earlier version
+from the Plans page; the restore creates a new version attributed to you.
+Agent-suggested memories wait on the Memory page for your review before
+they enter the agent's context. Activity includes per-user agent insights.
 
 Every one of those steps is backed by a real, inspectable record: a
 plan version, a memory, an audit event, a scheduled check-in. Nothing in
 the UI claims something happened that didn't.
 
-## Screenshots
-
-_(Run `npm run dev`, sign in with Demo Mode, and walk through Dashboard →
-Agent → Plans → Progress → Memory → Activity to see the app; screenshots
-aren't checked into this repo.)_
-
 ## Tech stack
 
 - **Frontend:** Next.js 16 (App Router), React 19, TypeScript, Tailwind
   CSS v4, `@tanstack/react-query`, `recharts`.
-- **Backend:** Next.js Route Handlers (Node.js runtime). Runs on Vercel
-  (the live deploy); a Cloud Run path is also maintained.
+- **Backend:** Next.js Route Handlers on Vercel.
 - **AI:** Google Gemini via Genkit (`genkit` + `@genkit-ai/google-genai`),
   structured (Zod-validated) output, a controlled tool registry.
 - **Database:** Firestore in production; a local JSON-file store (same
   schema) when running in `DEMO_MODE` or without Firebase credentials.
 - **Auth:** Firebase Authentication (Google + email/password), or a
   signed demo session cookie when `DEMO_MODE=true`.
-- **Background execution:** a guarded HTTP endpoint intended for Cloud
-  Scheduler in production; a dev-only endpoint locally.
+- **Background execution:** Vercel Cron calls a guarded GET endpoint daily;
+  a demo-only POST endpoint runs check-ins for the signed-in user locally.
 - **Testing:** Vitest (unit + integration).
+- **Delivery:** Web Push using VAPID keys and a service worker.
 
 See [`docs/architecture.md`](docs/architecture.md) for diagrams of the
 system, the agent's internal lifecycle, memory, the approval workflow,
@@ -76,7 +77,7 @@ background execution, and a full request sequence.
 ## Local setup
 
 ```bash
-npm install
+bun i          # dependencies are locked in bun.lock
 npm run seed   # populates the demo user "Alex" with realistic history
 npm run dev    # http://localhost:3000
 ```
@@ -92,6 +93,7 @@ npm run lint        # ESLint
 npm run typecheck   # tsc --noEmit
 npm test            # Vitest
 npm run build       # production build (also type-checks)
+npm run eval        # live Gemini scenarios and coaching judge; use a separate key
 ```
 
 ## Demo mode
@@ -171,6 +173,17 @@ var to an empty string to disable fallback.
    Firestore (`lib/repositories/index.ts`) once Admin credentials are
    present.
 
+## Enabling check-in push notifications
+
+Generate VAPID keys with `npx web-push generate-vapid-keys`. Set
+`NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`
+(for example `mailto:you@example.com`) in `.env.local` or Vercel. The
+public key is browser-visible; keep the private key server-side. The
+`npm run vercel:env` script pushes these variables. In Settings, enable
+"Notifications on this device" in each browser you want to receive them.
+The separate Reminders preference remains the server-side gate. On iOS,
+install the app to the Home Screen first.
+
 ## Testing
 
 ```bash
@@ -194,25 +207,41 @@ Covers (see `tests/unit` and `tests/integration`):
   `DemoAgentProvider`.
 - **Background check-ins** — one missed session out of five doesn't
   trigger an intervention; a severe adherence drop does, and schedules a
-  follow-up.
+  follow-up. Push tests cover delivery and expired-device pruning.
+- **Plan restore and check-in replies** — full snapshots, user attribution,
+  retry behavior, ownership checks, and confidence-based smaller steps.
+- **Agent metrics** — approval, degradation, safety, latency, token, confidence,
+  and 14-day post-change adherence calculations.
 - **Auth isolation** — the repository layer never returns or mutates
   another user's data.
+- **Progress** — session duration rates, streaks, empty logs, and multiple
+  sessions on the same day.
+- **Security utilities** — timing-safe string comparison, per-key rate
+  limiting, and session timestamp bounds.
+
+The separate live suite (`npm run eval`) runs eight Gemini scenarios and
+an MITI-inspired coaching judge, writing JSON reports under
+`evals/results/`. It skips without a key. Use `EVAL_GEMINI_API_KEY` with a
+separate key from the deployed app: a full run makes multiple model and
+judge calls and can consume the free tier's daily quota. The suite uses
+`.demo-data-eval/` and local storage, regardless of Firebase credentials.
 
 ## Deployment
 
-Two supported targets. Both use the same Firestore + Firebase Auth setup
-(Firestore free tier — no GCP billing needed for the database itself; run
-`gcloud firestore databases create --location=<region>` then
-`firebase deploy --only firestore:rules,firestore:indexes`, and enable
-**Google** + **Email/Password** providers in Firebase Auth).
+Deploy to Vercel. Create the Firestore database in the Firebase console,
+enable **Google** and **Email/Password** providers in Firebase Authentication,
+and deploy the rules and indexes with
+`firebase deploy --only firestore:rules,firestore:indexes`.
 
-### Deploy to Vercel (no GCP billing)
+### Deploy to Vercel
 
 Next.js runs natively; `firebase-admin`, Firestore and Firebase Auth work
 unchanged. The background job runs as a **Vercel Cron** hitting
 `GET /api/cron/run-due-checkins` (secured by the `CRON_SECRET` env var,
-which Vercel sends as `Authorization: Bearer`). On the Hobby plan cron is
-limited to **once per day** — `vercel.json` schedules it at 08:00 UTC.
+which Vercel sends as `Authorization: Bearer <CRON_SECRET>`). `vercel.json`
+schedules it daily at 08:00 UTC. Set the public Firebase Web App config
+(`NEXT_PUBLIC_FIREBASE_*`) in Vercel before building; Next.js inlines these
+values into the browser bundle.
 
 ```bash
 npx vercel login
@@ -223,111 +252,6 @@ npx vercel --prod
 
 Then add `<your-project>.vercel.app` to Firebase Auth → **Authorized
 domains**, and `curl https://<your-project>.vercel.app/api/health`.
-
-### Deploy to Cloud Run
-
-Prerequisites: `gcloud` authenticated, **billing enabled** on the project,
-Firestore created (`gcloud firestore databases create --location=<region>`),
-`firebase deploy --only firestore:rules,firestore:indexes` run, and:
-
-```bash
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
-  artifactregistry.googleapis.com secretmanager.googleapis.com \
-  cloudscheduler.googleapis.com firestore.googleapis.com identitytoolkit.googleapis.com
-```
-
-Then, with all values filled into `.env` / `.env.local` (including real
-`SESSION_SECRET` / `CRON_SECRET` — `openssl rand -base64 32`):
-
-```bash
-npm run deploy   # scripts/deploy.sh — see below
-```
-
-`scripts/deploy.sh` creates the Artifact Registry repo, syncs the
-`gemini-api-key` / `firebase-private-key` secrets from your env and grants
-the runtime service account access, builds + pushes the image via Cloud
-Build, and deploys the Cloud Run service. It then prints the follow-up
-steps (add the service host to Firebase **Authorized domains**; run
-`npm run setup:scheduler`).
-
-**Why a build step for the client config:** Next.js inlines
-`NEXT_PUBLIC_FIREBASE_*` into the browser bundle at build time, so those
-six values (the public Firebase Web App config — not secrets) are passed
-as Docker `--build-arg`s via `cloudbuild.yaml`. Passing them only to
-`gcloud run deploy` is too late and Google/email sign-in never
-initializes. Everything server-side (`DEMO_MODE`, Firebase Admin, Gemini,
-`SESSION_SECRET`, `CRON_SECRET`) is read from the Cloud Run runtime env.
-
-Doing it by hand instead of the script:
-
-```bash
-gcloud artifacts repositories create continuum --repository-format=docker --location=<region>
-
-gcloud builds submit --config cloudbuild.yaml --substitutions \
-_IMAGE=<region>-docker.pkg.dev/<PROJECT_ID>/continuum/continuum:latest,\
-_NEXT_PUBLIC_FIREBASE_API_KEY=...,_NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...,\
-_NEXT_PUBLIC_FIREBASE_PROJECT_ID=...,_NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=...,\
-_NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...,_NEXT_PUBLIC_FIREBASE_APP_ID=...
-
-gcloud run deploy continuum \
-  --image <region>-docker.pkg.dev/<PROJECT_ID>/continuum/continuum:latest \
-  --region <region> --allow-unauthenticated \
-  --set-env-vars DEMO_MODE=false,GEMINI_MODEL=gemini-3.5-flash \
-  --set-env-vars FIREBASE_PROJECT_ID=...,FIREBASE_CLIENT_EMAIL=... \
-  --set-env-vars SESSION_SECRET=...,CRON_SECRET=... \
-  --set-secrets GEMINI_API_KEY=gemini-api-key:latest,FIREBASE_PRIVATE_KEY=firebase-private-key:latest
-```
-
-The `Dockerfile` is a multi-stage build producing Next.js's `standalone`
-output, running as a non-root user, listening on `$PORT` (Cloud Run sets
-this), with a `HEALTHCHECK` against `GET /api/health`.
-
-### Background check-ins in production
-
-Once the Cloud Run service is deployed with a `CRON_SECRET` set, provision
-the Cloud Scheduler job that drives it with:
-
-```bash
-npm run setup:scheduler -- --secret=<CRON_SECRET>
-```
-
-This runs `scripts/setup-cloud-scheduler.sh`, which creates (or updates,
-idempotently) an HTTP job that POSTs to
-`<service-url>/api/cron/run-due-checkins` with header
-`X-Cron-Secret: <CRON_SECRET>` on an hourly schedule by default. It
-resolves the Cloud Run service URL for you, so it only needs the secret;
-everything else is optional:
-
-| Flag | Default |
-|---|---|
-| `--project=<id>` | current `gcloud config` project |
-| `--region=<region>` | `us-central1` |
-| `--service=<name>` | `continuum` |
-| `--url=<url>` | looked up from `--service`/`--region` |
-| `--schedule=<cron>` | `0 * * * *` (hourly) |
-| `--job-name=<name>` | `continuum-run-due-checkins` |
-
-`--secret` (or the `CRON_SECRET` env var) is the only required value, and
-it **must match** the `CRON_SECRET` env var already set on the Cloud Run
-service — otherwise every scheduled call gets a 401 from the route.
-Run `npm run setup:scheduler -- --help` for the full list, or
-`gcloud scheduler jobs run continuum-run-due-checkins --location us-central1`
-to trigger it immediately rather than waiting for the schedule.
-
-Prefer to see the raw command instead of running a script? It's exactly:
-
-```bash
-gcloud scheduler jobs create http continuum-run-due-checkins \
-  --schedule="0 * * * *" \
-  --uri="https://<your-service>/api/cron/run-due-checkins" \
-  --http-method=POST \
-  --headers="X-Cron-Secret=<CRON_SECRET>" \
-  --time-zone=UTC
-```
-
-No Cloud Tasks / Pub-Sub queue is required for this workload — one HTTP
-call evaluates every user's due check-ins per invocation, which is enough
-at the scale this app targets.
 
 ## Security model
 
@@ -340,29 +264,40 @@ at the scale this app targets.
   to lock down piecemeal.
 - **Tool execution is gated, not model-driven.** Gemini (or the demo
   provider) proposes *one* structured action at most; `policyEngine.ts`
-  is the sole authority on whether it's allowed and whether it needs
+  decides whether agent proposals are allowed and whether they need
   approval — the model's own `requiresApproval` field is advisory only.
+  A user-clicked plan restore carries explicit consent through the same
+  action ledger.
   `HIGH_RISK_HEALTH_ACTION` is unconditionally prohibited.
 - **Idempotency** — every `AgentAction` carries an `idempotencyKey`;
   `toolExecutor.ts` looks up a prior completed action with the same key
   before doing anything, so retries can't double-execute.
-- **Prompt injection is contained by the gate, not the prompt.** User
-  messages and remembered facts go into the model's context, so a user
-  can make the agent *say* odd things — but the deterministic policy
-  engine plus Zod validation of tool parameters mean it can't *do*
-  anything consequential without the policy allowing it and (for plan
-  changes, external messages, memory deletion) the user approving it.
+- **Action proposals pass through a deterministic gate.** The decision
+  engine validates proposed tool parameters, and the policy engine decides
+  whether an action is allowed and whether approval is required. Allowed
+  low-risk actions can execute without approval.
+- **Prompt injection is contained by the gate, not the prompt.** User messages
+  and remembered facts enter model context, so a user can make the agent say
+  odd things. The deterministic policy engine and Zod validation of tool
+  parameters prevent consequential actions unless policy allows them; plan
+  changes, external messages, and memory deletion require user approval.
 - **Safety boundary** — a deterministic keyword guard
   (`src/ai/agent/prompts.ts`) intercepts clearly urgent/self-harm
-  language before it ever reaches the model, returning a fixed
-  safety-resources message.
+  language before it ever reaches the model; a second model-flag layer
+  catches urgent paraphrases. Both return the same fixed safety-resources
+  message and record a safety stop.
+- **Memory review** — agent-inferred memories stay pending and excluded
+  from context until you confirm them. Updates to trusted memories need
+  approval.
+- **Push endpoints** — subscription URLs are restricted to known HTTPS
+  push services; expired endpoints are pruned after 404/410 responses.
 - Secrets (`GEMINI_API_KEY`, `FIREBASE_PRIVATE_KEY`, `SESSION_SECRET`,
-  `CRON_SECRET`) are read only from server-side env vars, never bundled
-  to the client. The cron endpoint compares `CRON_SECRET` in constant
-  time.
+  `CRON_SECRET`, `VAPID_PRIVATE_KEY`) are read only from server-side env vars, never bundled
+  to the client. The cron endpoint compares the Bearer value with
+  `timingSafeEqualStr`.
 - HTTP security headers (`X-Frame-Options`, `X-Content-Type-Options`,
   `Referrer-Policy`, `Permissions-Policy`) are set in `next.config.ts`;
-  Vercel adds HSTS. Per-user rate limits guard the agent and event
+  Vercel adds HSTS. Per-user, per-instance rate limits guard the agent and event
   endpoints (`lib/util/rateLimit.ts`). See [`SECURITY.md`](SECURITY.md).
 
 ## Data model
@@ -370,7 +305,7 @@ at the scale this app targets.
 Firestore-shaped collections under `users/{uid}` (mirrored 1:1 by the
 local JSON store): `memories`, `plans`, `planVersions`, `events` (doubles
 as both the behavioral log the progress engine reads and the audit trail
-the Activity page renders), `agentRuns`, `actions`, `checkins`,
+the Activity page renders), `agentRuns`, `actions`, `checkins`, `pushSubscriptions`,
 `conversations/{id}/messages`. See `lib/types.ts` for the full shape of
 every entity and `lib/repositories/types.ts` for the repository
 interfaces both backends implement identically.
@@ -380,42 +315,38 @@ interfaces both backends implement identically.
 ```mermaid
 flowchart LR
     RECEIVE --> CLASSIFY --> RETRIEVE_CONTEXT
-    RETRIEVE_CONTEXT -->|simple question| RESPOND
-    RETRIEVE_CONTEXT -->|needs reasoning| REASON --> PLAN --> VALIDATE
-    VALIDATE -->|missing info| ASK --> RESPOND
-    VALIDATE -->|needs approval| WAIT_FOR_APPROVAL --> EXECUTE
-    VALIDATE -->|allowed now| EXECUTE
-    EXECUTE --> VERIFY --> WRITE_MEMORY --> RESPOND
+    RETRIEVE_CONTEXT --> PROVIDER[Gemini or demo provider]
+    PROVIDER -->|optional proposal| POLICY[policy and action service]
+    PROVIDER -->|no proposal| MEMORY[verify memory candidates]
+    POLICY --> MEMORY --> RESPOND
 ```
 
 See `docs/architecture.md` for the full diagram set (it is all Mermaid)
 and `lib/agent/agentService.ts` for the implementation. Classification is
-a deterministic keyword check
-(`src/ai/agent/planner.ts`), not a second model call — Gemini is called at
-most once per user message (`src/ai/agent/decisionEngine.ts`), with a
-single structured (`AgentDecisionSchema`) response covering intent,
-evidence references, an optional proposed action, and any memory
-candidates.
+a deterministic keyword check (`src/ai/agent/planner.ts`). The Gemini
+provider uses a structured `AgentDecisionSchema` response; invalid action
+parameters can trigger one repair call (`src/ai/agent/decisionEngine.ts`).
 
 ## Limitations
 
-- **Gemini free tier is ~20 requests/day per model.** The decision call
-  falls back to a lighter model (`GEMINI_FALLBACK_MODELS`) when the
-  primary is rate-limited or retired; when everything is exhausted the
-  agent returns a "try again in a moment" message. A paid Gemini API key
-  removes this.
-- **The background check-in job runs once per day** (08:00 UTC) on the
-  Vercel Hobby plan — `vercel.json` schedules it. Pro plans or the Cloud
-  Run + Cloud Scheduler path can run it more often.
-- **Rate limiting is in-process** (`lib/util/rateLimit.ts`) — fine for the
-  single-instance deployment this targets, not for a scaled-out one.
+- **Gemini requests depend on the configured model's availability and
+  quota.** The decision call tries `GEMINI_FALLBACK_MODELS` when the primary
+  fails with an eligible error; if all configured models fail, the agent
+  asks the user to try again later.
+- **The background check-in job runs once per day** (08:00 UTC) as
+  scheduled in `vercel.json`.
+- **Rate limiting is in-process** (`lib/util/rateLimit.ts`) and does not
+  coordinate across Vercel function instances.
 - The proposal card in the Agent chat supports **Approve** and **Reject**
   but not an inline **Edit** of the proposed values before approving.
 
 ## Future improvements
 
-Agent run replay, memory-confidence visualization, a plan comparison
-view, a dedicated "why did you recommend this?" panel beyond the inline
-evidence list, a simulation / time-travel mode for demos, richer activity
-filtering, a dark-mode toggle (currently follows OS preference only), and
-keyboard shortcuts.
+- A dedicated open-weight safety and intent classifier as a third layer
+  (the user's note calls these "open weight versions of Jev, the system 1
+  model"; the model name still needs confirmation).
+- Genkit-to-OpenTelemetry export when Blaze/GCP billing is available.
+- Wearable signals and just-in-time adaptive intervention (JITAI) timing.
+- A post-hoc review tier for small, reversible plan changes under the
+  "autonomous" setting.
+- Agent run replay, a plan comparison view, and richer activity filtering.

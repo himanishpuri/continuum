@@ -5,7 +5,7 @@ import { selectMemoriesToPersist } from "@/src/ai/agent/verifier";
 import { containsSafetyTrigger, SAFETY_RESPONSE } from "@/src/ai/agent/prompts";
 import { findEvidence } from "@/lib/evidence/evidenceEngine";
 import { proposeAction } from "@/lib/tools/actionService";
-import { recordMemoryUsage } from "@/lib/memory/memoryService";
+import { listPendingMemories, recordMemoryUsage } from "@/lib/memory/memoryService";
 import { GeminiAgentProvider } from "./geminiAgentProvider";
 import { DemoAgentProvider } from "./demoAgentProvider";
 import type { AgentProvider } from "./agentProvider";
@@ -129,9 +129,17 @@ export async function sendAgentMessage(userId: string, message: string, conversa
     });
     await repos.agentRuns.update(userId, run.id, {
       status: "completed",
+      safetyStop: true,
       steps,
       resultSummary: SAFETY_RESPONSE,
       completedAt: new Date().toISOString(),
+    });
+    await repos.events.create(userId, {
+      type: "AGENT_COMPLETED",
+      timestamp: new Date().toISOString(),
+      source: "agent",
+      payload: { runId: run.id, safety: true, layer: "keyword" },
+      summary: "Responded with safety resources",
     });
     return { conversationId: conversation.id, runId: run.id, message: agentMessage, pendingApproval: null, steps };
   }
@@ -139,13 +147,51 @@ export async function sendAgentMessage(userId: string, message: string, conversa
   try {
     const context = await buildAgentContext(userId);
     const intent = classifyIntent(message);
+    const providerStartedAt = Date.now();
     const turn = await provider.handleMessage({ userId, message, history, context, intent });
+    const latencyMs = turn.meta?.latencyMs ?? Date.now() - providerStartedAt;
     const decision = turn.decision;
 
     const steps: AgentRunStep[] = [
       ...context.retrievedSteps.map((label) => ({ label, completedAt: new Date().toISOString() })),
       ...turn.steps.map((label) => ({ label, completedAt: new Date().toISOString() })),
     ];
+
+    if (decision.safetyConcern === "urgent") {
+      steps.push({ label: "Detected a safety-sensitive message", completedAt: new Date().toISOString() });
+      const agentMessage = await repos.conversations.addMessage(userId, conversation.id, {
+        role: "agent",
+        content: SAFETY_RESPONSE,
+        cards: [],
+        createdAt: new Date().toISOString(),
+        metadata: { runId: run.id },
+      });
+      await repos.conversations.update(userId, conversation.id, { updatedAt: new Date().toISOString() });
+      await repos.agentRuns.update(userId, run.id, {
+        status: "completed",
+        safetyStop: true,
+        ...(turn.meta && {
+          model: turn.meta.model,
+          usage: turn.meta.usage,
+          degraded: turn.meta.degraded,
+        }),
+        ...(turn.meta?.degraded && { error: turn.meta.error ?? "Model call degraded" }),
+        latencyMs,
+        intent: intent.intent,
+        confidence: decision.confidence,
+        steps,
+        resultSummary: SAFETY_RESPONSE,
+        completedAt: new Date().toISOString(),
+      });
+      await repos.events.create(userId, {
+        type: "AGENT_COMPLETED",
+        timestamp: new Date().toISOString(),
+        source: "agent",
+        payload: { runId: run.id, safety: true, layer: "model" },
+        summary: "Responded with safety resources",
+      });
+      return { conversationId: conversation.id, runId: run.id, message: agentMessage, pendingApproval: null, steps };
+    }
 
     let actionRecord: AgentAction | null = null;
     let denialReason: string | null = null;
@@ -161,9 +207,11 @@ export async function sendAgentMessage(userId: string, message: string, conversa
       else actionRecord = outcome.action;
     }
 
-    const memoriesToPersist = selectMemoriesToPersist(decision.memoryCandidates, context.memories);
+    let createdMemoryCount = actionRecord?.type === "CREATE_MEMORY" && actionRecord.status === "COMPLETED" ? 1 : 0;
+    const pendingMemories = await listPendingMemories(userId);
+    const memoriesToPersist = selectMemoriesToPersist(decision.memoryCandidates, [...context.memories, ...pendingMemories]);
     for (const candidate of memoriesToPersist) {
-      await proposeAction(userId, {
+      const outcome = await proposeAction(userId, {
         proposal: {
           actionType: "CREATE_MEMORY",
           parameters: {
@@ -180,6 +228,7 @@ export async function sendAgentMessage(userId: string, message: string, conversa
         permissions: context.user.settings.permissions,
         autonomyLevel: context.user.settings.autonomyLevel,
       });
+      if (outcome.action?.status === "COMPLETED") createdMemoryCount++;
     }
     if (context.memories.length > 0) {
       await recordMemoryUsage(userId, context.memories.map((m) => m.id));
@@ -190,6 +239,9 @@ export async function sendAgentMessage(userId: string, message: string, conversa
     const responseParts = [decision.summary];
     if (denialReason) responseParts.push(`(I can't do this automatically: ${denialReason})`);
     if (decision.clarifyingQuestion) responseParts.push(decision.clarifyingQuestion);
+    if (createdMemoryCount > 0) {
+      responseParts.push(`I noted ${createdMemoryCount} thing${createdMemoryCount > 1 ? "s" : ""} about you — you can confirm or dismiss ${createdMemoryCount > 1 ? "them" : "it"} on the Memory page.`);
+    }
     const responseText = responseParts.join("\n\n");
 
     const cards: ConversationMessageCard[] = [];
@@ -208,6 +260,15 @@ export async function sendAgentMessage(userId: string, message: string, conversa
 
     await repos.agentRuns.update(userId, run.id, {
       status: "completed",
+      ...(turn.meta && {
+        model: turn.meta.model,
+        usage: turn.meta.usage,
+        degraded: turn.meta.degraded,
+      }),
+      ...(turn.meta?.degraded && { error: turn.meta.error ?? "Model call degraded" }),
+      latencyMs,
+      intent: intent.intent,
+      confidence: decision.confidence,
       steps,
       planSummary: decision.proposedAction ? decision.summary : null,
       actions: actionRecord ? [{ actionId: actionRecord.id, type: actionRecord.type, status: actionRecord.status }] : [],
@@ -242,6 +303,7 @@ export async function sendAgentMessage(userId: string, message: string, conversa
     });
     await repos.agentRuns.update(userId, run.id, {
       status: "failed",
+      latencyMs: Date.now() - new Date(startedAt).getTime(),
       error: errorMessage,
       resultSummary: fallbackText,
       completedAt: new Date().toISOString(),

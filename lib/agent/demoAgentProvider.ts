@@ -1,5 +1,6 @@
 import type { AgentDecision } from "@/src/ai/schemas/agentSchemas";
 import type { AgentContext } from "@/src/ai/agent/context";
+import type { CommunicationStyle } from "@/lib/types";
 import type { AgentProvider, AgentTurnInput, AgentTurnResult } from "./agentProvider";
 
 function formatTime(hhmm: string): string {
@@ -19,17 +20,30 @@ function pct(rate: number): string {
   return `${Math.round(rate * 100)}%`;
 }
 
+function phrase(style: CommunicationStyle, text: Record<CommunicationStyle, string>): string {
+  return text[style];
+}
+
 function simpleQueryDecision(context: AgentContext): AgentDecision {
   const { plan } = context;
   const summary = plan
-    ? `Your next session is ${plan.durationMinutes} minutes, ${plan.frequencyLabel} at ${formatTime(plan.schedule.time)}. You're currently on a ${context.progress.streakDays}-day streak.`
-    : "You don't have an active plan yet — tell me about a routine you'd like help with and I can propose one.";
+    ? phrase(context.user.preferences.communicationStyle, {
+        concise: `Your next session is ${plan.durationMinutes} minutes, ${plan.frequencyLabel} at ${formatTime(plan.schedule.time)}. Your streak is ${context.progress.streakDays} days.`,
+        supportive: `You're keeping track of your routine. Your next session is ${plan.durationMinutes} minutes, ${plan.frequencyLabel} at ${formatTime(plan.schedule.time)}, and your streak is ${context.progress.streakDays} days.`,
+        direct: `Next: ${plan.durationMinutes} minutes, ${plan.frequencyLabel} at ${formatTime(plan.schedule.time)}. Your streak is ${context.progress.streakDays} days.`,
+      })
+    : phrase(context.user.preferences.communicationStyle, {
+        concise: "You don't have an active plan yet. What routine would you like to build?",
+        supportive: "It makes sense to start with a routine that fits your life. What would you like help building?",
+        direct: "Let's start with a routine that fits your week. What goal should it support?",
+      });
   return {
     intent: "simple_query",
     confidence: 0.95,
     summary,
     evidenceIds: plan ? ["current_plan_duration", "streak"] : [],
     nextStep: "None needed.",
+    safetyConcern: "none",
     proposedAction: null,
     requiresApproval: false,
     clarifyingQuestion: null,
@@ -44,6 +58,7 @@ function clarifyingDecision(question: string): AgentDecision {
     summary: "I want to make sure I understand before suggesting anything.",
     evidenceIds: [],
     nextStep: "Ask a clarifying question.",
+    safetyConcern: "none",
     proposedAction: null,
     requiresApproval: false,
     clarifyingQuestion: question,
@@ -51,13 +66,18 @@ function clarifyingDecision(question: string): AgentDecision {
   };
 }
 
-function generalDecision(): AgentDecision {
+function generalDecision(context: AgentContext): AgentDecision {
   return {
     intent: "general_request",
     confidence: 0.5,
-    summary: "I'm here to help with your routines, scheduling, and wellbeing planning. Let me know what you'd like to work on.",
+    summary: phrase(context.user.preferences.communicationStyle, {
+      concise: "I can help with a routine or schedule.",
+      supportive: "You're taking time to think about your wellbeing. I can help with a routine or schedule.",
+      direct: "Let's work on one routine or schedule issue.",
+    }),
     evidenceIds: [],
     nextStep: "Await further detail from the user.",
+    safetyConcern: "none",
     proposedAction: null,
     requiresApproval: false,
     clarifyingQuestion: "What would you like help with — your routine, schedule, or something else?",
@@ -82,9 +102,14 @@ export function adherenceDecision(context: AgentContext): AgentDecision {
     return {
       intent: "improve_adherence",
       confidence: 0.6,
-      summary: "You don't have an active plan yet, so there's nothing to compare against. Tell me about the routine you'd like help with and I can propose a starting plan.",
+      summary: phrase(user.preferences.communicationStyle, {
+        concise: "There's no active plan to compare yet.",
+        supportive: "Starting from your own goal makes sense; there's no active plan to compare yet.",
+        direct: "Let's set a starting routine before comparing progress.",
+      }),
       evidenceIds: [],
       nextStep: "Propose an initial plan once the user describes their goal.",
+      safetyConcern: "none",
       proposedAction: null,
       requiresApproval: false,
       clarifyingQuestion: "What routine or goal would you like help staying consistent with?",
@@ -97,15 +122,23 @@ export function adherenceDecision(context: AgentContext): AgentDecision {
   const best = [...buckets].sort((a, b) => b.completionRate - a.completionRate)[0];
 
   const alreadyOptimal = Boolean(best && currentBucket && best.durationMinutes === currentBucket.durationMinutes);
-  const meaningfulGap = Boolean(best) && best.completionRate - (currentBucket?.completionRate ?? 0) >= 0.15;
+  const gap = best ? best.completionRate - (currentBucket?.completionRate ?? 0) : 0;
+  // §49: confidence 0–4 makes a smaller step worth proposing for a borderline 5-point gap.
+  const lowConfidenceBias = (context.latestSelfReport?.confidence ?? 10) <= 4 && Boolean(best && best.durationMinutes < plan.durationMinutes);
+  const meaningfulGap = Boolean(best) && (gap >= 0.15 || (lowConfidenceBias && gap >= 0.05));
 
   if (alreadyOptimal && currentBucket) {
     return {
       intent: "improve_adherence",
       confidence: 0.75,
-      summary: `Your ${currentBucket.durationMinutes}-minute sessions already have your best completion rate (${pct(currentBucket.completionRate)}) — you're on the right plan. I'd recommend keeping this week's sessions as-is.`,
+      summary: phrase(user.preferences.communicationStyle, {
+        concise: `Your ${currentBucket.durationMinutes}-minute sessions have your best completion rate (${pct(currentBucket.completionRate)}). Would you like to keep this plan and check in next week?`,
+        supportive: `You've found a session length that works: ${currentBucket.durationMinutes} minutes has your best completion rate (${pct(currentBucket.completionRate)}). Would it be okay to keep this plan and check in next week?`,
+        direct: `Keep the ${currentBucket.durationMinutes}-minute plan; it has your best completion rate (${pct(currentBucket.completionRate)}). May I schedule a check-in next week?`,
+      }),
       evidenceIds,
       nextStep: checkinPending ? "Keep the current plan; a check-in is already scheduled." : "Keep the current plan; schedule a confirmation check-in.",
+      safetyConcern: "none",
       proposedAction: checkinPending
         ? null
         : {
@@ -129,9 +162,14 @@ export function adherenceDecision(context: AgentContext): AgentDecision {
     return {
       intent: "improve_adherence",
       confidence: 0.55,
-      summary: `Your overall completion rate over the last 30 days is ${pct(progress.completionRate)}, and it isn't clearly tied to session length yet. Rather than guess at a change, I'd like to see how a few more sessions go first.`,
+      summary: phrase(user.preferences.communicationStyle, {
+        concise: `Your completion rate is ${pct(progress.completionRate)}, without a clear session-length pattern yet. May I check in after a few more sessions?`,
+        supportive: `You've kept showing up; your completion rate is ${pct(progress.completionRate)}, but session length isn't a clear factor yet. Would it be okay to check in after a few more sessions?`,
+        direct: `Keep the plan while we gather more data; completion is ${pct(progress.completionRate)}. May I schedule a check-in in a few days?`,
+      }),
       evidenceIds,
       nextStep: checkinPending ? "Wait for more session data; a check-in is already scheduled." : "Schedule a check-in to gather more data before recommending a change.",
+      safetyConcern: "none",
       proposedAction: checkinPending
         ? null
         : {
@@ -157,9 +195,14 @@ export function adherenceDecision(context: AgentContext): AgentDecision {
   return {
     intent: "improve_adherence",
     confidence: 0.9,
-    summary: `I noticed something useful: your ${best.durationMinutes}-minute sessions have a ${pct(best.completionRate)} completion rate, compared to ${currentPct} for your current ${plan.durationMinutes}-minute sessions. Shorter sessions at your preferred time seem to work much better for you.`,
+    summary: phrase(user.preferences.communicationStyle, {
+      concise: `Your ${best.durationMinutes}-minute sessions reached ${pct(best.completionRate)} completion versus ${currentPct} for ${plan.durationMinutes} minutes. Would you like to try the smaller step?`,
+      supportive: `You've been finding ways to keep going. Your ${best.durationMinutes}-minute sessions reached ${pct(best.completionRate)} completion versus ${currentPct} for ${plan.durationMinutes} minutes; would you like to try that smaller step?`,
+      direct: `Try ${best.durationMinutes}-minute sessions: they reached ${pct(best.completionRate)} completion versus ${currentPct} for ${plan.durationMinutes} minutes. Would you like to make that change?`,
+    }),
     evidenceIds,
     nextStep: "Propose changing session duration to the better-performing length.",
+    safetyConcern: "none",
     proposedAction: {
       actionType: "MODIFY_PLAN",
       parameters: {
@@ -210,6 +253,6 @@ export class DemoAgentProvider implements AgentProvider {
       };
     }
 
-    return { decision: generalDecision(), steps: ["Prepared a general response from available context"] };
+    return { decision: generalDecision(context), steps: ["Prepared a general response from available context"] };
   }
 }

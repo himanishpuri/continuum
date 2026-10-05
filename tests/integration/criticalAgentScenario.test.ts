@@ -1,19 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getRepositories } from "@/lib/repositories";
 import { sendAgentMessage } from "@/lib/agent/agentService";
 import { approveAction } from "@/lib/tools/actionService";
 import { scheduleFollowupCheckin } from "@/lib/agent/followup";
+import { DemoAgentProvider } from "@/lib/agent/demoAgentProvider";
+import { seedStrugglingUser } from "@/tests/fixtures/seed";
 
 function uid() {
   return `test-critical-${randomUUID()}`;
 }
 
-function daysAgoIso(now: Date, n: number): string {
-  const d = new Date(now);
-  d.setDate(d.getDate() - n);
-  return d.toISOString();
-}
+afterEach(() => vi.restoreAllMocks());
 
 /**
  * §49: user prefers evenings, 15-minute sessions historically complete at
@@ -23,61 +21,39 @@ function daysAgoIso(now: Date, n: number): string {
  * the user approves — exercising DemoAgentProvider end-to-end since this
  * test runs in DEMO_MODE.
  */
-async function seedStrugglingUser(userId: string) {
-  const repos = getRepositories();
-  const now = new Date();
-  await repos.users.createUser({
-    profile: { uid: userId, name: "Test User", email: null, timezone: "UTC", createdAt: now.toISOString(), isDemo: true },
-    preferences: { preferredSessionTime: "19:00", preferredDurationMinutes: 15, communicationStyle: "supportive", reminderEnabled: true },
-    settings: {
-      autonomyLevel: "balanced",
-      permissions: { canCreateReminders: true, canModifyPlans: true, canScheduleFollowups: true, requireApprovalForExternalActions: true },
-      geminiModel: "gemini-flash-latest",
-    },
-  });
-
-  const plan = await repos.plans.create(userId, {
-    title: "Evening Recovery Routine",
-    goal: "Improve consistency",
-    description: "",
-    schedule: { daysOfWeek: [1, 2, 3, 4, 5], time: "19:00" },
-    durationMinutes: 30,
-    frequencyLabel: "Mon-Fri",
-    status: "active",
-    version: 1,
-    successMetrics: [],
-    checkinFrequencyDays: 7,
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-  });
-
-  // 15-minute sessions: 9/11 completed ≈ 82%
-  for (let i = 0; i < 11; i++) {
-    const missed = i === 4 || i === 5;
-    await repos.events.create(userId, {
-      type: missed ? "SESSION_MISSED" : "SESSION_COMPLETED",
-      timestamp: daysAgoIso(now, i + 15),
-      source: "system",
-      payload: { durationMinutes: 15 },
-      summary: "",
-    });
-  }
-  // 30-minute sessions: 5/13 completed ≈ 39%
-  for (let i = 0; i < 13; i++) {
-    const completed = [0, 3, 6, 9, 12].includes(i);
-    await repos.events.create(userId, {
-      type: completed ? "SESSION_COMPLETED" : "SESSION_MISSED",
-      timestamp: daysAgoIso(now, i + 30),
-      source: "system",
-      payload: { durationMinutes: 30 },
-      summary: "",
-    });
-  }
-
-  return plan;
-}
-
 describe("critical agent scenario (§49)", () => {
+  it("counts a completed direct CREATE_MEMORY proposal in the reply", async () => {
+    const userId = uid();
+    await seedStrugglingUser(userId);
+    vi.spyOn(DemoAgentProvider.prototype, "handleMessage").mockResolvedValue({
+      decision: {
+        intent: "general_request",
+        confidence: 0.9,
+        summary: "I can remember your preference.",
+        evidenceIds: [],
+        nextStep: "Suggest a memory",
+        safetyConcern: "none",
+        proposedAction: {
+          actionType: "CREATE_MEMORY",
+          parameters: { type: "preference", content: "Prefers evening sessions", expiresInDays: 30 },
+          reason: "Inferred from conversation.",
+          riskLevel: "low",
+          requiresApproval: false,
+        },
+        requiresApproval: false,
+        clarifyingQuestion: null,
+        memoryCandidates: [],
+      },
+      steps: [],
+    });
+
+    const result = await sendAgentMessage(userId, "I prefer evenings.");
+    const memories = await getRepositories().memories.list(userId);
+    expect(memories).toHaveLength(1);
+    expect(memories[0]).toMatchObject({ status: "pending", requestedExpiresInDays: 30 });
+    expect(result.message.content).toContain("I noted 1 thing about you");
+  });
+
   it("proposes shorter sessions gated by approval, then completes the full lifecycle once approved", async () => {
     const userId = uid();
     const plan = await seedStrugglingUser(userId);
@@ -102,9 +78,13 @@ describe("critical agent scenario (§49)", () => {
     expect(versions).toHaveLength(1);
     expect(versions[0].version).toBe(2);
 
-    // A memory candidate about the duration/completion pattern should have been persisted.
+    // A memory candidate about the duration/completion pattern awaits review.
     const memories = await repos.memories.list(userId);
-    expect(memories.some((m) => m.type === "pattern")).toBe(true);
+    expect(memories.some((m) => m.type === "pattern" && m.status === "pending")).toBe(true);
+    expect(result.message.content).toContain("Memory page");
+
+    await sendAgentMessage(userId, "I'm struggling to stay consistent.");
+    expect((await repos.memories.list(userId)).filter((m) => m.type === "pattern" && m.status === "pending")).toHaveLength(1);
 
     // Approving triggers the audit trail (§58).
     const events = await repos.events.list(userId);

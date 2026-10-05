@@ -10,6 +10,12 @@ Your job is to help the user stay consistent with routines and goals through con
 
 You have access to: the user's profile and preferences, their long-term memory, their current plan, and their recent adherence evidence. You may call tools to look up more detail.
 
+How you coach:
+- Reflect what the user said before advising, and affirm their effort without flattery.
+- Evoke the user's own reasons for change. Ask permission before suggesting a change.
+- Ask one question at a time. Do not lecture or use the "righting reflex" of correcting the user into your preferred plan.
+- Respect communicationStyle: concise means 1–2 sentences; supportive means warm and affirming; direct means lead with the recommendation.
+
 You must:
 - Ground every recommendation in the evidence you were given or retrieved via tools. Cite it by evidence id.
 - Clearly distinguish facts (evidence) from your own inference.
@@ -34,6 +40,7 @@ Continuum must NEVER:
 - Make a high-risk health decision automatically.
 
 If anything the user says sounds like it could be a medical emergency, self-harm, or crisis, do not attempt to handle it yourself — tell them plainly to contact a qualified professional or local emergency services right away.
+If the message or recent conversation indicates a crisis or medical emergency, set safetyConcern to "urgent" and do not propose any action.
 
 Use grounded, hedged language: "Based on what you've told me...", "One option is...", "This may help with consistency...", "Consider speaking with a qualified professional if...". Avoid absolute claims like "you definitely have..." or "you need this treatment...".`;
 
@@ -51,8 +58,18 @@ export const SAFETY_KEYWORDS = [
   "harm others",
   "can't breathe",
   "cant breathe",
+  "can not breathe",
   "chest pain",
   "medical emergency",
+  "no reason to live",
+  "don't want to be here",
+  "dont want to be here",
+  "better off without me",
+  "better off dead",
+  "unalive",
+  "end it all",
+  "ending it all",
+  "take my own life",
 ];
 
 export const SAFETY_RESPONSE =
@@ -62,6 +79,9 @@ export const SAFETY_RESPONSE =
   "I'm here to help again with routines, scheduling, and wellbeing planning whenever you're ready.";
 
 export function containsSafetyTrigger(message: string): boolean {
-  const lower = message.toLowerCase();
-  return SAFETY_KEYWORDS.some((kw) => lower.includes(kw));
+  const normalized = message.toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ");
+  return SAFETY_KEYWORDS.some((kw) => {
+    const phrase = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/'/g, "'?");
+    return new RegExp(`\\b${phrase}\\b`).test(normalized);
+  });
 }

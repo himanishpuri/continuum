@@ -1,13 +1,14 @@
-/**
- * §51/§52: notifications are represented as events/check-ins in Firestore;
- * this interface exists so a real email/SMS/push provider can be swapped
- * in later without touching the agent or API layers. The demo never needs
- * a real provider to prove the agent's behavior.
- */
+import webpush from "web-push";
+import { randomUUID } from "node:crypto";
+import { getRepositories } from "@/lib/repositories";
+
+/** §51/§52: check-in delivery to a user's registered browsers. */
 export interface OutboundNotification {
   userId: string;
   message: string;
   channel: "email" | "sms" | "push";
+  title?: string;
+  url?: string;
 }
 
 export interface NotificationService {
@@ -15,14 +16,44 @@ export interface NotificationService {
 }
 
 export class MockNotificationService implements NotificationService {
+  async send(): Promise<{ id: string; delivered: boolean }> {
+    return { id: `mock-notification-${randomUUID()}`, delivered: false };
+  }
+}
+
+export class WebPushNotificationService implements NotificationService {
+  constructor() {
+    webpush.setVapidDetails(process.env.VAPID_SUBJECT!, process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!, process.env.VAPID_PRIVATE_KEY!);
+  }
+
   async send(notification: OutboundNotification): Promise<{ id: string; delivered: boolean }> {
-    console.log(`[MockNotificationService] Would send ${notification.channel} to ${notification.userId}: ${notification.message}`);
-    return { id: `mock-notification-${Date.now()}`, delivered: true };
+    const repo = getRepositories().pushSubscriptions;
+    const subscriptions = await repo.list(notification.userId);
+    let delivered = false;
+    const payload = JSON.stringify({
+      title: notification.title ?? "Continuum",
+      message: notification.message,
+      url: notification.url?.startsWith("/") && !notification.url.startsWith("//") ? notification.url : "/dashboard",
+    });
+    await Promise.all(subscriptions.map(async (subscription) => {
+      try {
+        await webpush.sendNotification({ endpoint: subscription.endpoint, keys: subscription.keys }, payload);
+        delivered = true;
+      } catch (error) {
+        const statusCode = (error as { statusCode?: number }).statusCode;
+        if (statusCode === 404 || statusCode === 410) await repo.deleteByEndpoint(notification.userId, subscription.endpoint);
+      }
+    }));
+    return { id: randomUUID(), delivered };
   }
 }
 
 let instance: NotificationService | null = null;
 export function getNotificationService(): NotificationService {
-  if (!instance) instance = new MockNotificationService();
+  if (!instance) {
+    instance = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT
+      ? new WebPushNotificationService()
+      : new MockNotificationService();
+  }
   return instance;
 }

@@ -62,7 +62,7 @@ export async function executeAction(userId: string, actionId: string): Promise<A
     await repos.events.create(userId, {
       type: outcome.eventType,
       timestamp: outcome.eventTimestamp ?? new Date().toISOString(),
-      source: "agent",
+      source: action.initiatedBy ?? "agent",
       payload: { actionId: action.id, actionType: action.type, ...(outcome.eventPayload ?? outcome.result) },
       summary: outcome.eventSummary,
     });
@@ -73,7 +73,7 @@ export async function executeAction(userId: string, actionId: string): Promise<A
     await repos.events.create(userId, {
       type: "AGENT_FAILED",
       timestamp: new Date().toISOString(),
-      source: "agent",
+      source: action.initiatedBy ?? "agent",
       payload: { actionId: action.id, actionType: action.type, error: message },
       summary: `Action failed: ${message}`,
     });
@@ -116,6 +116,7 @@ interface PlanMutationParams {
   successMetrics?: string[];
   checkinFrequencyDays?: number;
   reason?: string;
+  status?: Plan["status"];
 }
 
 async function executeCreatePlan(userId: string, action: AgentAction): Promise<ExecutionResult> {
@@ -147,7 +148,7 @@ async function executeCreatePlan(userId: string, action: AgentAction): Promise<E
     reason: p.reason ?? "Initial plan created.",
     evidenceIds: action.evidenceIds,
     createdAt: now,
-    createdBy: "agent",
+    createdBy: action.initiatedBy ?? "agent",
   });
 
   return {
@@ -189,8 +190,28 @@ async function executeModifyPlan(userId: string, action: AgentAction): Promise<E
     changes.push({ field: "goal", from: existing.goal, to: p.goal });
     patch.goal = p.goal;
   }
+  if (p.description !== undefined && p.description !== existing.description) {
+    changes.push({ field: "description", from: existing.description, to: p.description });
+    patch.description = p.description;
+  }
+  if (p.successMetrics !== undefined && JSON.stringify(p.successMetrics) !== JSON.stringify(existing.successMetrics)) {
+    changes.push({ field: "successMetrics", from: existing.successMetrics, to: p.successMetrics });
+    patch.successMetrics = p.successMetrics;
+  }
+  if (p.checkinFrequencyDays !== undefined && p.checkinFrequencyDays !== existing.checkinFrequencyDays) {
+    changes.push({ field: "checkinFrequencyDays", from: existing.checkinFrequencyDays, to: p.checkinFrequencyDays });
+    patch.checkinFrequencyDays = p.checkinFrequencyDays;
+  }
+  if (p.frequencyLabel !== undefined && p.frequencyLabel !== existing.frequencyLabel && p.daysOfWeek === undefined) {
+    changes.push({ field: "frequencyLabel", from: existing.frequencyLabel, to: p.frequencyLabel });
+    patch.frequencyLabel = p.frequencyLabel;
+  }
+  if (p.status !== undefined && p.status !== existing.status) {
+    changes.push({ field: "status", from: existing.status, to: p.status });
+    patch.status = p.status;
+  }
 
-  if (changes.length === 0) {
+  if (changes.length === 0 && !(action.initiatedBy === "user" && action.reason.startsWith("Restored v"))) {
     return {
       result: { planId: existing.id, version: existing.version, noop: true },
       eventType: "PLAN_UPDATED",
@@ -207,16 +228,18 @@ async function executeModifyPlan(userId: string, action: AgentAction): Promise<E
     version: newVersion,
     snapshot: stripId(updated),
     changes,
-    reason: p.reason ?? "Updated based on recent adherence.",
+    reason: p.reason ?? action.reason,
     evidenceIds: action.evidenceIds,
     createdAt: now,
-    createdBy: "agent",
+    createdBy: action.initiatedBy ?? "agent",
   });
 
   return {
     result: { planId: updated.id, version: updated.version, changes },
     eventType: "PLAN_UPDATED",
-    eventSummary: `Updated plan to v${updated.version} (${changes.map((c) => c.field).join(", ")}).`,
+    eventSummary: action.initiatedBy === "user" && action.reason.startsWith("Restored v")
+      ? `Restored plan to ${action.reason.slice("Restored ".length)}`
+      : `Updated plan to v${updated.version} (${changes.map((c) => c.field).join(", ")}).`,
   };
 }
 
@@ -267,12 +290,13 @@ async function executeCreateMemory(userId: string, action: AgentAction): Promise
     content: p.content,
     confidence: p.confidence ?? 0.7,
     source: "inferred",
+    status: "pending",
     expiresInDays: p.expiresInDays ?? null,
   });
   return {
     result: { memoryId: memory.id },
     eventType: "MEMORY_CREATED",
-    eventSummary: `Remembered: "${memory.content}"`,
+    eventSummary: `Suggested a memory for your review: "${memory.content}"`,
   };
 }
 

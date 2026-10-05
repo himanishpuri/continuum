@@ -8,6 +8,7 @@ import { createLocalEventsRepository } from "./eventsRepository";
 import { createLocalAgentRunsRepository } from "./agentRunsRepository";
 import { createLocalActionsRepository } from "./actionsRepository";
 import { createLocalCheckinsRepository } from "./checkinsRepository";
+import { createLocalPushSubscriptionsRepository } from "./pushSubscriptionsRepository";
 import { createLocalConversationsRepository } from "./conversationsRepository";
 
 export function createLocalRepositories(): Repositories {
@@ -20,6 +21,7 @@ export function createLocalRepositories(): Repositories {
     agentRuns: createLocalAgentRunsRepository(),
     actions: createLocalActionsRepository(),
     checkins: createLocalCheckinsRepository(),
+    pushSubscriptions: createLocalPushSubscriptionsRepository(),
     conversations: createLocalConversationsRepository(),
     listUserIds,
   };

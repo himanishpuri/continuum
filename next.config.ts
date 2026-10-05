@@ -9,12 +9,14 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  // Standalone output is for the Cloud Run Dockerfile. On Vercel it breaks
-  // the platform's own build finalization (missing *.nft.json), and Vercel
-  // does its own function bundling anyway — so skip it there.
-  output: process.env.VERCEL ? undefined : "standalone",
   async headers() {
-    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
+    return [
+      { source: "/:path*", headers: SECURITY_HEADERS },
+      { source: "/sw.js", headers: [
+        { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+        { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+      ] },
+    ];
   },
 };
 

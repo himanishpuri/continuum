@@ -44,6 +44,8 @@ next-env.d.ts
 # continuum demo data store (local JSON persistence for DEMO_MODE)
 /.demo-data/
 /.demo-data-test/
+/.demo-data-eval/
+/evals/results/
 
 # firebase service account files if placed locally
 *serviceAccount*.json

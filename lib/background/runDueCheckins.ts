@@ -2,6 +2,7 @@ import { getRepositories } from "@/lib/repositories";
 import { computeProgressSnapshot } from "@/lib/progress/progressEngine";
 import { buildEvidence } from "@/lib/evidence/evidenceEngine";
 import { proposeAction } from "@/lib/tools/actionService";
+import { getNotificationService } from "@/lib/external/notificationService";
 import type { CheckIn, Plan, ProgressSnapshot, UserRecord } from "@/lib/types";
 
 export interface CheckinRunResult {
@@ -12,17 +13,20 @@ export interface CheckinRunResult {
 }
 
 /**
- * §23: the production entry point is Cloud Scheduler → Cloud Run hitting
- * POST /api/cron/run-due-checkins, which calls this for every user. Locally,
- * POST /api/dev/run-due-checkins calls the same function directly so the
- * demo can simulate background execution without any scheduler infra.
+ * §23: Vercel Cron calls GET /api/cron/run-due-checkins, which runs this
+ * for every user. Locally, POST /api/dev/run-due-checkins calls
+ * runDueCheckinsForUser for the signed-in user on demand.
  */
 export async function runDueCheckinsForAllUsers(now: Date = new Date()): Promise<CheckinRunResult[]> {
   const repos = getRepositories();
   const userIds = await repos.listUserIds();
   const results: CheckinRunResult[] = [];
   for (const userId of userIds) {
-    results.push(...(await runDueCheckinsForUser(userId, now)));
+    try {
+      results.push(...(await runDueCheckinsForUser(userId, now)));
+    } catch (err) {
+      console.error("Background check-in failed for user", userId, err);
+    }
   }
   return results;
 }
@@ -113,6 +117,24 @@ async function evaluateCheckin(
     response: message,
   });
 
+  // §51: this is the user's opted-in reminder, not an agent SEND_EXTERNAL_MESSAGE action.
+  if (user.preferences.reminderEnabled) {
+    try {
+      const sent = await getNotificationService().send({
+        userId, channel: "push", title: "Continuum check-in", message, url: "/dashboard#checkin",
+      });
+      if (sent.delivered) {
+        await repos.events.create(userId, {
+          type: "MESSAGE_SENT", timestamp: now.toISOString(), source: "background",
+          payload: { checkinId: completedCheckin.id, notificationId: sent.id },
+          summary: "Sent your check-in reminder.",
+        });
+      }
+    } catch (error) {
+      console.error("Check-in notification failed", userId, error);
+    }
+  }
+
   await repos.events.create(userId, {
     type: "CHECKIN_COMPLETED",
     timestamp: now.toISOString(),
@@ -126,7 +148,7 @@ async function evaluateCheckin(
     trigger: "background_checkin",
     input: checkin.message,
     status: "completed",
-    provider: "demo",
+    provider: "rules", // Deterministic evaluator; no model is called.
     steps: steps.map((label) => ({ label, completedAt: now.toISOString() })),
     planSummary: null,
     actions: [],

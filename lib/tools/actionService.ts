@@ -11,6 +11,7 @@ export interface ProposeActionInput {
   permissions: AgentPermissions;
   autonomyLevel: AutonomyLevel;
   idempotencyKey?: string;
+  initiatedBy?: "user" | "agent";
 }
 
 export interface ProposeActionOutcome {
@@ -29,11 +30,15 @@ const ACTION_EXPIRY_MS = 1000 * 60 * 60 * 24 * 3; // 3 days
  * later via approveAction/rejectAction.
  */
 export async function proposeAction(userId: string, input: ProposeActionInput): Promise<ProposeActionOutcome> {
-  const decision = evaluatePolicy({
+  const agentDecision = evaluatePolicy({
     actionType: input.proposal.actionType,
     permissions: input.permissions,
     autonomyLevel: input.autonomyLevel,
   });
+  // §71: an explicit user action is already consented to; agent permissions do not govern it.
+  const decision = input.initiatedBy === "user" && input.proposal.actionType !== "HIGH_RISK_HEALTH_ACTION"
+    ? { allowed: true, requiresApproval: false, riskLevel: agentDecision.riskLevel === "prohibited" ? "medium" as const : agentDecision.riskLevel, reason: "Requested by you." }
+    : agentDecision;
 
   if (!decision.allowed) {
     return { allowed: false, reason: decision.reason, action: null };
@@ -50,6 +55,7 @@ export async function proposeAction(userId: string, input: ProposeActionInput): 
   const now = new Date().toISOString();
   let action = await repos.actions.create(userId, {
     type: input.proposal.actionType,
+    ...(input.initiatedBy ? { initiatedBy: input.initiatedBy } : {}),
     parameters: input.proposal.parameters,
     reason: input.proposal.reason,
     evidenceIds: input.evidenceIds,

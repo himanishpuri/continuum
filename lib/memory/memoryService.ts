@@ -3,6 +3,7 @@ import type { Memory, MemoryType } from "@/lib/types";
 
 const DEFAULT_LIMIT = 8;
 const RECENCY_HALFLIFE_DAYS = 30;
+const PENDING_REVIEW_DAYS = 14;
 
 export interface MemoryRetrievalOptions {
   types?: MemoryType[];
@@ -29,7 +30,7 @@ export async function retrieveRelevantMemories(userId: string, opts: MemoryRetri
     : await repos.memories.list(userId);
 
   const now = Date.now();
-  memories = memories.filter((m) => !m.expiresAt || new Date(m.expiresAt).getTime() > now);
+  memories = memories.filter((m) => m.status !== "pending" && (!m.expiresAt || new Date(m.expiresAt).getTime() > now));
   const ranked = [...memories].sort((a, b) => score(b, now) - score(a, now));
   return ranked.slice(0, opts.limit ?? DEFAULT_LIMIT);
 }
@@ -40,6 +41,7 @@ export interface CreateMemoryInput {
   confidence: number;
   source: Memory["source"];
   expiresInDays?: number | null;
+  status?: Memory["status"];
 }
 
 /**
@@ -49,18 +51,45 @@ export interface CreateMemoryInput {
  */
 export async function createMemory(userId: string, input: CreateMemoryInput): Promise<Memory> {
   const now = new Date();
-  const expiresAt = input.expiresInDays
-    ? new Date(now.getTime() + input.expiresInDays * 24 * 60 * 60 * 1000).toISOString()
-    : null;
+  const expiresAt = input.status === "pending"
+    ? new Date(now.getTime() + PENDING_REVIEW_DAYS * 24 * 60 * 60 * 1000).toISOString()
+    : input.expiresInDays != null
+      ? new Date(now.getTime() + input.expiresInDays * 24 * 60 * 60 * 1000).toISOString()
+      : null;
   return getRepositories().memories.create(userId, {
     type: input.type,
     content: input.content,
     confidence: input.confidence,
     source: input.source,
+    ...(input.status === "pending" && { status: "pending" as const, requestedExpiresInDays: input.expiresInDays ?? null }),
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
     lastUsedAt: null,
     expiresAt,
+  });
+}
+
+export async function listPendingMemories(userId: string): Promise<Memory[]> {
+  const now = Date.now();
+  return (await getRepositories().memories.list(userId))
+    .filter((m) => m.status === "pending" && (!m.expiresAt || new Date(m.expiresAt).getTime() > now))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function confirmMemory(userId: string, id: string): Promise<Memory> {
+  const repos = getRepositories();
+  const memory = await repos.memories.get(userId, id);
+  if (!memory || memory.status !== "pending") {
+    throw new Error("Pending memory not found.");
+  }
+  const now = new Date();
+  return repos.memories.update(userId, id, {
+    status: "active",
+    expiresAt: memory.requestedExpiresInDays != null
+      ? new Date(now.getTime() + memory.requestedExpiresInDays * 24 * 60 * 60 * 1000).toISOString()
+      : null,
+    requestedExpiresInDays: null,
+    updatedAt: now.toISOString(),
   });
 }
 

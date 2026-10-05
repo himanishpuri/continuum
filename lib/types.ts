@@ -69,6 +69,8 @@ export interface Memory {
   content: string;
   confidence: number; // 0..1
   source: "user_statement" | "inferred" | "seed";
+  status?: "active" | "pending";
+  requestedExpiresInDays?: number | null;
   createdAt: string;
   updatedAt: string;
   lastUsedAt: string | null;
@@ -183,7 +185,14 @@ export interface AgentRun {
   trigger: "user_message" | "background_checkin";
   input: string;
   status: AgentRunStatus;
-  provider: "gemini" | "demo";
+  provider: "gemini" | "demo" | "rules";
+  model?: string;
+  latencyMs?: number;
+  usage?: { inputTokens: number; outputTokens: number };
+  degraded?: boolean;
+  intent?: string;
+  confidence?: number;
+  safetyStop?: boolean;
   steps: AgentRunStep[];
   planSummary: string | null;
   actions: AgentRunActionRef[];
@@ -223,6 +232,7 @@ export interface AgentAction {
   id: ID;
   userId: ID;
   type: ActionType;
+  initiatedBy?: "user" | "agent";
   parameters: Record<string, unknown>;
   reason: string;
   evidenceIds: string[];
@@ -253,8 +263,19 @@ export interface CheckIn {
   completedAt: string | null;
   status: CheckinStatus;
   message: string;
+  /** The agent's evaluation of progress; the user's reply is selfReport. */
   response: string | null;
+  selfReport?: { confidence: number; note: string | null; answeredAt: string }; // 0–10 MI confidence ruler
   createdBy: "user" | "agent";
+  createdAt: string;
+}
+
+export interface PushSubscriptionRecord {
+  id: ID;
+  userId: ID;
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  userAgent: string;
   createdAt: string;
 }
 

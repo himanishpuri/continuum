@@ -12,6 +12,7 @@ export interface AgentContext {
   evidence: Evidence[];
   /** Pending (not-yet-completed) check-ins, soonest first — so the agent doesn't schedule another on top. */
   pendingCheckins: CheckIn[];
+  latestSelfReport: CheckIn["selfReport"] | null;
   /** ISO instant this context was assembled — the model's reference for resolving "yesterday", "on Wednesday", etc. */
   now: string;
   /** Human-readable labels for work already done while assembling this context — surfaced in the Agent Run UI (§9). */
@@ -42,6 +43,9 @@ export async function buildAgentContext(userId: string): Promise<AgentContext> {
   const pendingCheckins = checkins
     .filter((c) => c.status === "pending")
     .sort((a, b) => (a.scheduledAt < b.scheduledAt ? -1 : 1));
+  const latestSelfReport = checkins
+    .filter((c) => c.selfReport)
+    .sort((a, b) => (a.selfReport!.answeredAt < b.selfReport!.answeredAt ? 1 : -1))[0]?.selfReport ?? null;
 
   return {
     user,
@@ -50,6 +54,7 @@ export async function buildAgentContext(userId: string): Promise<AgentContext> {
     progress,
     evidence,
     pendingCheckins,
+    latestSelfReport,
     now: now.toISOString(),
     retrievedSteps: [
       "Retrieved relevant history",
@@ -109,6 +114,11 @@ export function buildContextBlock(context: AgentContext): string {
     context.pendingCheckins.length === 0
       ? "None scheduled."
       : `${context.pendingCheckins.length} already scheduled; next on ${context.pendingCheckins[0].scheduledAt}. Do not schedule another.`,
+    ``,
+    `LATEST SELF-REPORT`,
+    context.latestSelfReport
+      ? `Confidence: ${context.latestSelfReport.confidence}/10 at ${context.latestSelfReport.answeredAt}. Note: ${context.latestSelfReport.note ?? "None."}`
+      : "No confidence rating yet.",
     ``,
     `RECENT PROGRESS`,
     summarizeProgress(context.progress),

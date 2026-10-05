@@ -37,6 +37,11 @@ export default function MemoryPage() {
     await queryClient.invalidateQueries({ queryKey: ["memories"] });
   }
 
+  async function confirmMemory(id: string) {
+    await api.patch(`/api/memories/${id}`, { status: "active" });
+    await queryClient.invalidateQueries({ queryKey: ["memories"] });
+  }
+
   async function forgetAll() {
     await api.delete("/api/memories");
     setConfirmForgetAll(false);
@@ -47,6 +52,8 @@ export default function MemoryPage() {
   if (isError || !data) return <ErrorState message="Couldn't load memory." onRetry={() => refetch()} />;
 
   const memories = data.memories;
+  const pendingMemories = memories.filter((m) => m.status === "pending");
+  const activeMemories = memories.filter((m) => m.status !== "pending");
 
   return (
     <div className="flex flex-col gap-6">
@@ -62,11 +69,25 @@ export default function MemoryPage() {
         )}
       </div>
 
+      {pendingMemories.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Needs your review</CardTitle>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Continuum suggested these from your conversations. They aren&apos;t used until you confirm them.</p>
+          </CardHeader>
+          <div className="flex flex-col gap-2">
+            {pendingMemories.map((m) => (
+              <MemoryCard key={m.id} memory={m} onConfirm={() => confirmMemory(m.id)} onDelete={() => deleteMemory(m.id)} onEdit={(content) => editMemory(m.id, content)} />
+            ))}
+          </div>
+        </Card>
+      )}
+
       {memories.length === 0 ? (
         <EmptyState title="No memories yet" description="As you talk with Continuum, durable preferences, goals, and patterns it learns about you will show up here." />
       ) : (
         CATEGORY_ORDER.map(({ type, label }) => {
-          const items = memories.filter((m) => m.type === type);
+          const items = activeMemories.filter((m) => m.type === type);
           if (items.length === 0) return null;
           return (
             <Card key={type}>

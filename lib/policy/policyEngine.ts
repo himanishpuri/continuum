@@ -64,7 +64,7 @@ export function evaluatePolicy({ actionType, permissions, autonomyLevel }: Polic
       return allow({ riskLevel: "low", requiresApproval: false, reason: "Recording a fact for later doesn't change anything today." });
 
     case "UPDATE_MEMORY":
-      return allow({ riskLevel: "low", requiresApproval: false, reason: "Refining an existing memory doesn't change your plan." });
+      return allow({ riskLevel: "low", requiresApproval: true, reason: "Editing a trusted memory changes what Continuum believes about you, so it needs your approval." });
 
     case "DELETE_MEMORY":
       return allow({ riskLevel: "medium", requiresApproval: true, reason: "Deleting memory is irreversible, so it needs your approval." });

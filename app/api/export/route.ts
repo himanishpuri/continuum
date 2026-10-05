@@ -10,7 +10,7 @@ export async function GET() {
   const repos = getRepositories();
   const uid = auth.user.uid;
   const plans = await repos.plans.list(uid);
-  const [user, memories, planVersions, events, agentRuns, actions, checkins, conversations] = await Promise.all([
+  const [user, memories, planVersions, events, agentRuns, actions, checkins, conversations, subscriptions] = await Promise.all([
     repos.users.getUser(uid),
     repos.memories.list(uid),
     Promise.all(plans.map((p) => repos.planVersions.listByPlan(uid, p.id))).then((v) => v.flat()),
@@ -19,6 +19,7 @@ export async function GET() {
     repos.actions.list(uid),
     repos.checkins.list(uid),
     repos.conversations.list(uid),
+    repos.pushSubscriptions.list(uid),
   ]);
 
   const conversationsWithMessages = await Promise.all(
@@ -36,6 +37,7 @@ export async function GET() {
       agentRuns,
       actions,
       checkins,
+      pushSubscriptions: subscriptions.map(({ keys: _keys, ...subscription }) => ({ ...subscription, keys: "[redacted]" })),
       conversations: conversationsWithMessages,
     },
     null,
