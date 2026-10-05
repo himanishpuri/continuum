@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "genkit";
 import { requireApiUser } from "@/lib/auth/apiAuth";
 import { getRepositories } from "@/lib/repositories";
-import { deleteMemory, updateMemory } from "@/lib/memory/memoryService";
+import { confirmMemory, deleteMemory, updateMemory } from "@/lib/memory/memoryService";
 
 const PatchSchema = z.object({
   content: z.string().min(1).optional(),
   confidence: z.number().min(0).max(1).optional(),
+  status: z.literal("active").optional(),
 });
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -18,13 +19,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!parsed.success) return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
 
   try {
-    const memory = await updateMemory(auth.user.uid, id, parsed.data);
+    const memory = parsed.data.status === "active"
+      ? await confirmMemory(auth.user.uid, id)
+      : await updateMemory(auth.user.uid, id, parsed.data);
     await getRepositories().events.create(auth.user.uid, {
       type: "MEMORY_UPDATED",
       timestamp: new Date().toISOString(),
       source: "user",
       payload: { memoryId: id },
-      summary: `User edited a memory: "${memory.content}"`,
+      summary: parsed.data.status === "active"
+        ? `You confirmed: "${memory.content}"`
+        : `User edited a memory: "${memory.content}"`,
     });
     return NextResponse.json({ memory });
   } catch {

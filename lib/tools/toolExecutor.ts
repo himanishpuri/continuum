@@ -267,12 +267,13 @@ async function executeCreateMemory(userId: string, action: AgentAction): Promise
     content: p.content,
     confidence: p.confidence ?? 0.7,
     source: "inferred",
+    status: "pending",
     expiresInDays: p.expiresInDays ?? null,
   });
   return {
     result: { memoryId: memory.id },
     eventType: "MEMORY_CREATED",
-    eventSummary: `Remembered: "${memory.content}"`,
+    eventSummary: `Suggested a memory for your review: "${memory.content}"`,
   };
 }
 

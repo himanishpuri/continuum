@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getRepositories } from "@/lib/repositories";
 import { sendAgentMessage } from "@/lib/agent/agentService";
 import { approveAction } from "@/lib/tools/actionService";
 import { scheduleFollowupCheckin } from "@/lib/agent/followup";
+import { DemoAgentProvider } from "@/lib/agent/demoAgentProvider";
 
 function uid() {
   return `test-critical-${randomUUID()}`;
@@ -14,6 +15,8 @@ function daysAgoIso(now: Date, n: number): string {
   d.setDate(d.getDate() - n);
   return d.toISOString();
 }
+
+afterEach(() => vi.restoreAllMocks());
 
 /**
  * §49: user prefers evenings, 15-minute sessions historically complete at
@@ -78,6 +81,38 @@ async function seedStrugglingUser(userId: string) {
 }
 
 describe("critical agent scenario (§49)", () => {
+  it("counts a completed direct CREATE_MEMORY proposal in the reply", async () => {
+    const userId = uid();
+    await seedStrugglingUser(userId);
+    vi.spyOn(DemoAgentProvider.prototype, "handleMessage").mockResolvedValue({
+      decision: {
+        intent: "general_request",
+        confidence: 0.9,
+        summary: "I can remember your preference.",
+        evidenceIds: [],
+        nextStep: "Suggest a memory",
+        safetyConcern: "none",
+        proposedAction: {
+          actionType: "CREATE_MEMORY",
+          parameters: { type: "preference", content: "Prefers evening sessions", expiresInDays: 30 },
+          reason: "Inferred from conversation.",
+          riskLevel: "low",
+          requiresApproval: false,
+        },
+        requiresApproval: false,
+        clarifyingQuestion: null,
+        memoryCandidates: [],
+      },
+      steps: [],
+    });
+
+    const result = await sendAgentMessage(userId, "I prefer evenings.");
+    const memories = await getRepositories().memories.list(userId);
+    expect(memories).toHaveLength(1);
+    expect(memories[0]).toMatchObject({ status: "pending", requestedExpiresInDays: 30 });
+    expect(result.message.content).toContain("I noted 1 thing about you");
+  });
+
   it("proposes shorter sessions gated by approval, then completes the full lifecycle once approved", async () => {
     const userId = uid();
     const plan = await seedStrugglingUser(userId);
@@ -102,9 +137,13 @@ describe("critical agent scenario (§49)", () => {
     expect(versions).toHaveLength(1);
     expect(versions[0].version).toBe(2);
 
-    // A memory candidate about the duration/completion pattern should have been persisted.
+    // A memory candidate about the duration/completion pattern awaits review.
     const memories = await repos.memories.list(userId);
-    expect(memories.some((m) => m.type === "pattern")).toBe(true);
+    expect(memories.some((m) => m.type === "pattern" && m.status === "pending")).toBe(true);
+    expect(result.message.content).toContain("Memory page");
+
+    await sendAgentMessage(userId, "I'm struggling to stay consistent.");
+    expect((await repos.memories.list(userId)).filter((m) => m.type === "pattern" && m.status === "pending")).toHaveLength(1);
 
     // Approving triggers the audit trail (§58).
     const events = await repos.events.list(userId);

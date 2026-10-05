@@ -61,6 +61,7 @@ describe("agent safety stops", () => {
         memoryCandidates: [{ type: "preference", content: "Store this", confidence: 0.9, expiresInDays: null }],
       },
       steps: ["Model decision ready"],
+      meta: { model: "safety-test", latencyMs: 7, usage: { inputTokens: 12, outputTokens: 3 }, repaired: false, degraded: false },
     });
 
     const result = await sendAgentMessage(userId, "Could you help me with my routine?");
@@ -72,6 +73,7 @@ describe("agent safety stops", () => {
     expect(await repos.actions.list(userId)).toEqual([]);
     expect(await repos.memories.list(userId)).toEqual([]);
     expect(run?.safetyStop).toBe(true);
+    expect(run).toMatchObject({ model: "safety-test", latencyMs: 7, usage: { inputTokens: 12, outputTokens: 3 }, degraded: false, intent: "improve_adherence", confidence: 0.9 });
     expect(run?.steps.map((step) => step.label)).toContain("Detected a safety-sensitive message");
     expect((await repos.events.list(userId)).find((event) => event.type === "AGENT_COMPLETED")).toMatchObject({
       payload: { runId: result.runId, safety: true, layer: "model" },

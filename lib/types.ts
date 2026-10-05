@@ -69,6 +69,8 @@ export interface Memory {
   content: string;
   confidence: number; // 0..1
   source: "user_statement" | "inferred" | "seed";
+  status?: "active" | "pending";
+  requestedExpiresInDays?: number | null;
   createdAt: string;
   updatedAt: string;
   lastUsedAt: string | null;

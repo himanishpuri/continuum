@@ -16,6 +16,13 @@ describe("policyEngine", () => {
     expect(result.requiresApproval).toBe(false);
   });
 
+  it("requires approval to update a trusted memory", () => {
+    const result = evaluatePolicy({ actionType: "UPDATE_MEMORY", permissions, autonomyLevel: "autonomous" });
+    expect(result.allowed).toBe(true);
+    expect(result.riskLevel).toBe("low");
+    expect(result.requiresApproval).toBe(true);
+  });
+
   it("requires approval for a consequential plan change regardless of autonomy level", () => {
     const conservative = evaluatePolicy({ actionType: "MODIFY_PLAN", permissions, autonomyLevel: "conservative" });
     const autonomous = evaluatePolicy({ actionType: "MODIFY_PLAN", permissions, autonomyLevel: "autonomous" });

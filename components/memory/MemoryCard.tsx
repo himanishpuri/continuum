@@ -3,13 +3,16 @@
 import { useState } from "react";
 import { Trash2, Pencil, Check, X } from "lucide-react";
 import type { Memory } from "@/lib/types";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 
-export function MemoryCard({ memory, onDelete, onEdit }: { memory: Memory; onDelete: () => void; onEdit: (content: string) => void }) {
+export function MemoryCard({ memory, onDelete, onEdit, onConfirm }: { memory: Memory; onDelete: () => void; onEdit: (content: string) => void; onConfirm?: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(memory.content);
 
   return (
     <div className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-800">
+      {memory.status === "pending" && <Badge tone="warning" className="mb-2">Pending review</Badge>}
       {editing ? (
         <div className="flex items-start gap-2">
           <textarea
@@ -50,14 +53,20 @@ export function MemoryCard({ memory, onDelete, onEdit }: { memory: Memory; onDel
             >
               <Pencil className="h-3.5 w-3.5" />
             </button>
-            <button
+            {memory.status !== "pending" && <button
               aria-label="Delete memory"
               onClick={onDelete}
               className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
             >
               <Trash2 className="h-3.5 w-3.5" />
-            </button>
+            </button>}
           </div>
+        </div>
+      )}
+      {memory.status === "pending" && onConfirm && !editing && (
+        <div className="mt-2 flex gap-2">
+          <Button size="sm" onClick={onConfirm}>Confirm</Button>
+          <Button size="sm" variant="secondary" onClick={onDelete}>Dismiss</Button>
         </div>
       )}
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
@@ -65,6 +74,7 @@ export function MemoryCard({ memory, onDelete, onEdit }: { memory: Memory; onDel
         <span>Source: {memory.source.replace("_", " ")}</span>
         <span>Created {new Date(memory.createdAt).toLocaleDateString()}</span>
         <span>Last used {memory.lastUsedAt ? new Date(memory.lastUsedAt).toLocaleDateString() : "never"}</span>
+        {memory.expiresAt && <span>Expires {new Date(memory.expiresAt).toLocaleDateString()}</span>}
       </div>
     </div>
   );
