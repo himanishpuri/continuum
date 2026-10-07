@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getRepositories } from "@/lib/repositories";
 import { runDueCheckinsForUser } from "@/lib/background/runDueCheckins";
 import * as notifications from "@/lib/external/notificationService";
+import { BEHAVIOR_MANIFEST } from "@/src/ai/behaviorManifest";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -98,6 +99,9 @@ describe("background check-in evaluation (§23/§24)", () => {
     const results = await runDueCheckinsForUser(userId, now);
     expect(results).toHaveLength(1);
     expect(results[0].outcome).toBe("no_action_needed");
+    expect((await repos.agentRuns.listRecent(userId, 1))[0]).toMatchObject({
+      trigger: "background_checkin", release: "local", guardrails: BEHAVIOR_MANIFEST.guardrails,
+    });
 
     const updated = await repos.checkins.get(userId, checkin.id);
     expect(updated?.status).toBe("completed");

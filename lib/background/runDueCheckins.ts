@@ -1,4 +1,5 @@
 import { getRepositories } from "@/lib/repositories";
+import { BEHAVIOR_MANIFEST } from "@/src/ai/behaviorManifest";
 import { computeProgressSnapshot } from "@/lib/progress/progressEngine";
 import { buildEvidence } from "@/lib/evidence/evidenceEngine";
 import { proposeAction } from "@/lib/tools/actionService";
@@ -149,6 +150,8 @@ async function evaluateCheckin(
     input: checkin.message,
     status: "completed",
     provider: "rules", // Deterministic evaluator; no model is called.
+    release: BEHAVIOR_MANIFEST.release,
+    guardrails: BEHAVIOR_MANIFEST.guardrails,
     steps: steps.map((label) => ({ label, completedAt: now.toISOString() })),
     planSummary: null,
     actions: [],

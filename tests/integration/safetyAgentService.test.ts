@@ -4,6 +4,7 @@ import { getRepositories } from "@/lib/repositories";
 import { sendAgentMessage } from "@/lib/agent/agentService";
 import { DemoAgentProvider } from "@/lib/agent/demoAgentProvider";
 import { SAFETY_RESPONSE } from "@/src/ai/agent/prompts";
+import { BEHAVIOR_MANIFEST } from "@/src/ai/behaviorManifest";
 
 async function createUser() {
   const userId = `test-safety-${randomUUID()}`;
@@ -32,7 +33,9 @@ describe("agent safety stops", () => {
     expect(handleMessage).not.toHaveBeenCalled();
     expect(result.message.content).toBe(SAFETY_RESPONSE);
     expect(result.pendingApproval).toBeNull();
-    expect((await repos.agentRuns.get(userId, result.runId))?.safetyStop).toBe(true);
+    expect(await repos.agentRuns.get(userId, result.runId)).toMatchObject({
+      safetyStop: true, release: "local", guardrails: BEHAVIOR_MANIFEST.guardrails,
+    });
     expect((await repos.events.list(userId)).find((event) => event.type === "AGENT_COMPLETED")).toMatchObject({
       payload: { runId: result.runId, safety: true, layer: "keyword" },
       summary: "Responded with safety resources",
@@ -61,7 +64,7 @@ describe("agent safety stops", () => {
         memoryCandidates: [{ type: "preference", content: "Store this", confidence: 0.9, expiresInDays: null }],
       },
       steps: ["Model decision ready"],
-      meta: { model: "safety-test", prompt: "agent_decision@1#test0000", latencyMs: 7, usage: { inputTokens: 12, outputTokens: 3 }, repaired: false, degraded: false },
+      meta: { model: "safety-test", prompt: "agent_decision@1#test0000", promptSource: "bundled", tools: "test", outputSchema: "test", latencyMs: 7, usage: { inputTokens: 12, outputTokens: 3 }, repaired: false, degraded: false },
     });
 
     const result = await sendAgentMessage(userId, "Could you help me with my routine?");
@@ -96,7 +99,7 @@ describe("agent safety stops", () => {
         clarifyingQuestion: null,
         memoryCandidates: [],
       },
-      meta: { model: "test", prompt: "agent_decision@1#test0000", latencyMs: 1, usage: { inputTokens: 0, outputTokens: 0 }, repaired: false, degraded: true },
+      meta: { model: "test", prompt: "agent_decision@1#test0000", promptSource: "bundled", tools: "test", outputSchema: "test", latencyMs: 1, usage: { inputTokens: 0, outputTokens: 0 }, repaired: false, degraded: true },
       steps: [],
     });
 

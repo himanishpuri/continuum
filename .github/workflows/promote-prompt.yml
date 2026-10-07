@@ -1,0 +1,30 @@
+name: Promote prompt
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: Prompt name
+        required: true
+      version:
+        description: Langfuse version number
+        required: true
+
+# Promoting the current main hash should follow a green eval run.
+# Rollback to an older pinned version needs no new eval run.
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    env:
+      LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+      LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+      LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+      PROMPT_NAME: ${{ inputs.name }}
+      PROMPT_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: npm run prompts:promote -- "$PROMPT_NAME" "$PROMPT_VERSION"

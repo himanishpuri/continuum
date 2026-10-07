@@ -3,6 +3,7 @@ import { buildAgentContext } from "@/src/ai/agent/context";
 import { classifyIntent } from "@/src/ai/agent/planner";
 import { claimsCompletedChange, selectMemoriesToPersist } from "@/src/ai/agent/verifier";
 import { containsSafetyTrigger, SAFETY_RESPONSE } from "@/src/ai/agent/prompts";
+import { BEHAVIOR_MANIFEST } from "@/src/ai/behaviorManifest";
 import { findEvidence } from "@/lib/evidence/evidenceEngine";
 import { proposeAction } from "@/lib/tools/actionService";
 import { listPendingMemories, recordMemoryUsage } from "@/lib/memory/memoryService";
@@ -101,6 +102,8 @@ export async function sendAgentMessage(userId: string, message: string, conversa
     input: message,
     status: "running",
     provider: provider.name,
+    release: BEHAVIOR_MANIFEST.release,
+    guardrails: BEHAVIOR_MANIFEST.guardrails,
     steps: [],
     planSummary: null,
     actions: [],
@@ -173,6 +176,9 @@ export async function sendAgentMessage(userId: string, message: string, conversa
         ...(turn.meta && {
           model: turn.meta.model,
           ...(turn.meta.prompt && { prompt: turn.meta.prompt }),
+          ...(turn.meta.promptSource && { promptSource: turn.meta.promptSource }),
+          ...(turn.meta.tools && { tools: turn.meta.tools }),
+          ...(turn.meta.outputSchema && { outputSchema: turn.meta.outputSchema }),
           usage: turn.meta.usage,
           degraded: turn.meta.degraded,
         }),
@@ -266,6 +272,9 @@ export async function sendAgentMessage(userId: string, message: string, conversa
       ...(turn.meta && {
         model: turn.meta.model,
         ...(turn.meta.prompt && { prompt: turn.meta.prompt }),
+        ...(turn.meta.promptSource && { promptSource: turn.meta.promptSource }),
+        ...(turn.meta.tools && { tools: turn.meta.tools }),
+        ...(turn.meta.outputSchema && { outputSchema: turn.meta.outputSchema }),
         usage: turn.meta.usage,
         degraded: turn.meta.degraded,
       }),

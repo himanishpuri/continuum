@@ -3,6 +3,19 @@ import { computeAgentMetrics } from "@/lib/metrics/agentMetrics";
 import type { AgentAction, AgentRun, CheckIn, EventRecord } from "@/lib/types";
 
 describe("agent metrics", () => {
+  it("computes per-prompt median latency and measured token average", () => {
+    const runs = [
+      { prompt: "a", latencyMs: 10, usage: { inputTokens: 2, outputTokens: 3 }, actions: [] },
+      { prompt: "a", latencyMs: 30, usage: { inputTokens: 4, outputTokens: 6 }, actions: [] },
+      { prompt: "b", latencyMs: 100, actions: [] },
+    ] as unknown as AgentRun[];
+    const metrics = computeAgentMetrics(runs, [], [], [], null);
+    expect(metrics.byPrompt).toMatchObject([
+      { prompt: "a", p50LatencyMs: 20, tokensPerTurn: 7.5 },
+      { prompt: "b", p50LatencyMs: 100, tokensPerTurn: null },
+    ]);
+  });
+
   it("computes approval, run, confidence, and 14-day intervention outcomes", () => {
     const runs = [
       { latencyMs: 100, usage: { inputTokens: 20, outputTokens: 10 }, degraded: false, safetyStop: false, prompt: "agent_decision@1#aaaa0000", actions: [{ actionId: "approved" }] },
@@ -28,8 +41,8 @@ describe("agent metrics", () => {
     expect(metrics.confidenceTrend).toMatchObject({ latest: 7, change: 3 });
     expect(metrics.postInterventionAdherence[0]).toMatchObject({ beforeRate: 0.5, afterRate: 1, change: 0.5 });
     expect(metrics.byPrompt).toEqual([
-      { prompt: "agent_decision@1#aaaa0000", runs: 1, safetyStops: 0, degradedRate: 0, approvalRate: 1 },
-      { prompt: "agent_decision@1#bbbb0000", runs: 1, safetyStops: 1, degradedRate: 1, approvalRate: 0 },
+      { prompt: "agent_decision@1#aaaa0000", runs: 1, safetyStops: 0, degradedRate: 0, approvalRate: 1, p50LatencyMs: 100, tokensPerTurn: 30 },
+      { prompt: "agent_decision@1#bbbb0000", runs: 1, safetyStops: 1, degradedRate: 1, approvalRate: 0, p50LatencyMs: 300, tokensPerTurn: 50 },
     ]);
   });
 });

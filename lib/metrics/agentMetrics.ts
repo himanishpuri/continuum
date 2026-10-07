@@ -10,11 +10,21 @@ export interface AgentMetrics {
   tokensPerTurn: number | null;
   confidenceTrend: { latest: number | null; change: number | null; ratings: number[] };
   postInterventionAdherence: { eventId: string; beforeRate: number | null; afterRate: number | null; change: number | null }[];
-  byPrompt: { prompt: string; runs: number; safetyStops: number; degradedRate: number | null; approvalRate: number | null }[];
+  byPrompt: { prompt: string; runs: number; safetyStops: number; degradedRate: number | null; approvalRate: number | null; p50LatencyMs: number | null; tokensPerTurn: number | null }[];
 }
 
 function rate(numerator: number, denominator: number): number | null {
   return denominator ? numerator / denominator : null;
+}
+
+function runPerformance(runs: AgentRun[]) {
+  const latencies = runs.map((run) => run.latencyMs).filter((value): value is number => typeof value === "number").sort((a, b) => a - b);
+  const middle = Math.floor(latencies.length / 2);
+  const measured = runs.filter((run) => run.usage);
+  return {
+    p50LatencyMs: !latencies.length ? null : latencies.length % 2 ? latencies[middle] : (latencies[middle - 1] + latencies[middle]) / 2,
+    tokensPerTurn: measured.length ? measured.reduce((total, run) => total + run.usage!.inputTokens + run.usage!.outputTokens, 0) / measured.length : null,
+  };
 }
 
 /** §58: per-user, deterministic metrics from persisted runs and events. */
@@ -24,10 +34,6 @@ export function computeAgentMetrics(
 ): AgentMetrics {
   const decided = actions.filter((action) => action.approvalRequired && ["APPROVED", "COMPLETED", "EXECUTING", "REJECTED"].includes(action.status));
   const approved = decided.filter((action) => action.status !== "REJECTED").length;
-  const latencies = runs.map((run) => run.latencyMs).filter((value): value is number => typeof value === "number").sort((a, b) => a - b);
-  const middle = Math.floor(latencies.length / 2);
-  const p50LatencyMs = latencies.length === 0 ? null : latencies.length % 2 ? latencies[middle] : (latencies[middle - 1] + latencies[middle]) / 2;
-  const measured = runs.filter((run) => run.usage);
   const ratings = checkins.flatMap((checkin) => checkin.selfReport ? [checkin.selfReport] : [])
     .sort((a, b) => a.answeredAt.localeCompare(b.answeredAt)).map((report) => report.confidence);
   const sessionEvents = events.filter((event) => event.type === "SESSION_COMPLETED" || event.type === "SESSION_MISSED");
@@ -62,6 +68,7 @@ export function computeAgentMetrics(
       safetyStops: group.filter((run) => run.safetyStop).length,
       degradedRate: rate(group.filter((run) => run.degraded).length, group.length),
       approvalRate: rate(promptDecided.filter((action) => action.status !== "REJECTED").length, promptDecided.length),
+      ...runPerformance(group),
     };
   }).sort((a, b) => b.runs - a.runs || a.prompt.localeCompare(b.prompt));
   return {
@@ -69,8 +76,7 @@ export function computeAgentMetrics(
     rejectionRate: rate(decided.length - approved, decided.length),
     degradedRate: rate(runs.filter((run) => run.degraded).length, runs.length),
     safetyStops: runs.filter((run) => run.safetyStop).length,
-    p50LatencyMs,
-    tokensPerTurn: measured.length ? measured.reduce((total, run) => total + (run.usage!.inputTokens + run.usage!.outputTokens), 0) / measured.length : null,
+    ...runPerformance(runs),
     confidenceTrend: { latest: ratings.at(-1) ?? null, change: ratings.length > 1 ? ratings.at(-1)! - ratings[0] : null, ratings },
     postInterventionAdherence: interventions,
     byPrompt,

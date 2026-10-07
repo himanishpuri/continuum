@@ -140,7 +140,11 @@ endpoint — the seed data includes an already-due check-in.)
    DEMO_MODE=false
    GEMINI_API_KEY=your-key
    GEMINI_MODEL=gemini-3.5-flash   # a concrete, currently-served model id
-   PROMPT_VARIANT=                 # optional agent_decision.<variant>.prompt
+   PROMPT_VARIANT=                 # optional name[:pct], sticky by user ID
+   PROMPT_LABEL=production        # optional Langfuse label
+   LANGFUSE_PUBLIC_KEY=           # optional; both keys enable Langfuse
+   LANGFUSE_SECRET_KEY=
+   LANGFUSE_BASE_URL=             # optional Langfuse host
    ```
 3. `GeminiAgentProvider` (backed by Genkit + `@genkit-ai/google-genai`)
    activates automatically — see `src/ai/genkit.ts` and
@@ -159,7 +163,15 @@ var to an empty string to disable fallback.
 
 ### Prompt versions
 
-The Gemini decision prompt lives in `prompts/agent_decision.prompt`. Each model-backed Agent Run records its `name@version#hash8` prompt id. Set `PROMPT_VARIANT` to use an existing `agent_decision.<variant>.prompt`; an unknown variant falls back to the baseline with a warning. Prompt edits require a version bump, a new hash in `tests/unit/promptVersioning.test.ts`, and `npm run eval` to compare reports.
+The Gemini decision prompt lives in `prompts/agent_decision.prompt`. Each model-backed Agent Run records its `name@version#hash8` prompt id. `PROMPT_VARIANT=name[:pct]` selects a bundled variant for all or a sticky percentage of users. Prompt edits require a version bump, a new full hash in `src/ai/promptPins.ts`, and `npm run eval`. Compare reports with `npm run eval:compare -- a.json b.json`. `npm run prompts:publish` sends pinned sources to Langfuse staging; `npm run prompts:promote -- <name> <langfuseVersion>` moves production. Runtime accepts only pinned Langfuse source and falls back to bundled text. Langfuse traces contain metadata and usage only, without user text or IDs.
+
+| Variable | Purpose |
+| --- | --- |
+| `PROMPT_VARIANT` | Bundled variant `name` or sticky percentage `name:50` |
+| `PROMPT_LABEL` | Langfuse label to read; defaults to `production` |
+| `LANGFUSE_PUBLIC_KEY` | Enables Langfuse when paired with the secret key |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key |
+| `LANGFUSE_BASE_URL` | Optional Langfuse host |
 
 ## Enabling Firebase
 

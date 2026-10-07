@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { genkit } from "genkit";
 import { describe, expect, it, vi } from "vitest";
 import { AgentDecisionSchema } from "@/src/ai/schemas/agentSchemas";
-import { resolveAgentPrompt, sanitizePromptInput } from "@/src/ai/promptVersion";
+import { renderPromptSource, resolveAgentPrompt, sanitizePromptInput } from "@/src/ai/promptVersion";
+import { PROMPT_PINS } from "@/src/ai/promptPins";
 
 const promptDir = join(process.cwd(), "prompts");
 const ai = genkit({ promptDir: "prompts" });
@@ -13,9 +14,6 @@ const fixtures = JSON.parse(readFileSync("tests/fixtures/promptGolden.json", "ut
   name: string; contextBlock: string; history: string; toolCatalog: string; message: string; intent: string;
   pushToCommit: boolean; repairProblem: string | null; repairActionType: string | null; system: string; prompt: string;
 }[];
-const PINNED: Record<string, Record<string, string>> = {
-  agent_decision: { "1": "718d259f1cb7d8098b1484daa52ee489de50ec33d50a8a6bfb0db2b4734bd8ab" },
-};
 
 async function render(input: Record<string, unknown>) {
   const rendered = await ai.prompt("agent_decision").render(input);
@@ -42,7 +40,7 @@ describe("agent decision prompt", () => {
       const version = frontmatter?.[1].match(/^version:\s*(\d+)\s*$/m)?.[1];
       const name = file.slice(0, -".prompt".length);
       const hash = createHash("sha256").update(source).digest("hex");
-      expect(PINNED[name]?.[version ?? ""], `${file} changed: bump version and add the new hash in tests/unit/promptVersioning.test.ts`).toBe(hash);
+      expect(PROMPT_PINS[name]?.[version ?? ""], `${file} changed: bump version and add the new hash in src/ai/promptPins.ts`).toBe(hash);
     }
   });
 
@@ -77,5 +75,13 @@ describe("agent decision prompt", () => {
     expect(resolved).toEqual(baseline);
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
+  });
+
+  it("renders pinned source identically to the bundled Dotprompt", async () => {
+    const input = { contextBlock: "context", history: "history", toolCatalog: "tools", message: "hello", intent: "simple_query" };
+    const source = readFileSync(join(promptDir, "agent_decision.prompt"), "utf8");
+    const direct = await renderPromptSource(ai, source, input);
+    const bundled = await ai.prompt("agent_decision").render(input);
+    expect(direct.messages).toEqual(bundled.messages);
   });
 });

@@ -2,10 +2,14 @@ import type { ConversationMessage } from "@/lib/types";
 import { ai, fallback, getFallbackModels, getGeminiModel, retry } from "../genkit";
 import { AgentDecisionSchema, type AgentDecision, type IntentClassification } from "../schemas/agentSchemas";
 import { buildContextBlock, type AgentContext } from "./context";
-import { AGENT_PROMPT, sanitizePromptInput } from "../promptVersion";
+import { promptInfo, renderPromptSource, sanitizePromptInput, selectAgentPrompt } from "../promptVersion";
+import { BEHAVIOR_MANIFEST } from "../behaviorManifest";
+import { isPinned } from "../promptPins";
+import { fetchLabeledPrompt, recordDecision } from "../langfuse";
 import { describeToolCatalog, findToolByActionType } from "../tools/registry";
 
 export interface DecisionRequest {
+  userId: string;
   message: string;
   history: ConversationMessage[];
   context: AgentContext;
@@ -15,6 +19,9 @@ export interface DecisionRequest {
 export interface DecisionMeta {
   model: string;
   prompt: string;
+  promptSource: "bundled" | "langfuse";
+  tools: string;
+  outputSchema: string;
   latencyMs: number;
   usage: { inputTokens: number; outputTokens: number };
   repaired: boolean;
@@ -23,6 +30,7 @@ export interface DecisionMeta {
 }
 
 const MAX_HISTORY_TURNS = 12;
+const warnedHashes = new Set<string>();
 
 function renderHistory(history: ConversationMessage[]): string {
   const recent = history.slice(-MAX_HISTORY_TURNS);
@@ -67,15 +75,43 @@ function clarificationRounds(history: ConversationMessage[]): number {
  */
 export async function decide(request: DecisionRequest): Promise<{ decision: AgentDecision; meta: DecisionMeta }> {
   const startedAt = Date.now();
+  const selected = selectAgentPrompt(request.userId);
+  let served = selected;
+  let langfusePrompt: Awaited<ReturnType<typeof fetchLabeledPrompt>> = null;
+  if (!selected.variant) {
+    langfusePrompt = await fetchLabeledPrompt("agent_decision");
+    if (langfusePrompt) {
+      try {
+        const candidate = promptInfo(langfusePrompt.source);
+        if (isPinned("agent_decision", candidate.hash)) served = candidate;
+        else if (!warnedHashes.has(candidate.hash)) {
+          console.warn(`Langfuse prompt ${candidate.hash} is not pinned; using bundled prompt`);
+          warnedHashes.add(candidate.hash);
+        }
+      } catch {
+        console.warn("Langfuse prompt is invalid; using bundled prompt");
+      }
+    }
+  }
   const meta: DecisionMeta = {
     model: process.env.GEMINI_MODEL || "gemini-3.5-flash",
-    prompt: AGENT_PROMPT.id,
+    prompt: served.id,
+    promptSource: served === selected ? "bundled" : "langfuse",
+    tools: BEHAVIOR_MANIFEST.tools,
+    outputSchema: BEHAVIOR_MANIFEST.outputSchema,
     latencyMs: 0,
     usage: { inputTokens: 0, outputTokens: 0 },
     repaired: false,
     degraded: false,
   };
-  const finish = (decision: AgentDecision) => ({ decision, meta: { ...meta, latencyMs: Date.now() - startedAt } });
+  const finish = (decision: AgentDecision) => {
+    meta.latencyMs = Date.now() - startedAt;
+    try {
+      recordDecision({ ...meta, guardrails: BEHAVIOR_MANIFEST.guardrails, release: BEHAVIOR_MANIFEST.release,
+        safetyConcern: decision.safetyConcern, intent: decision.intent }, meta.promptSource === "langfuse" ? langfusePrompt?.client : undefined);
+    } catch (error) { console.warn("Langfuse trace failed", error); }
+    return { decision, meta };
+  };
   const rounds = clarificationRounds(request.history);
   const promptInput = {
     contextBlock: sanitizePromptInput(buildContextBlock(request.context)),
@@ -89,10 +125,13 @@ export async function decide(request: DecisionRequest): Promise<{ decision: Agen
   const generate = async (repairProblem?: string, repairActionType?: string) => {
     const requestedModel = getGeminiModel();
     meta.model = requestedModel.name;
-    const rendered = await ai.prompt("agent_decision", AGENT_PROMPT.variant ? { variant: AGENT_PROMPT.variant } : undefined).render({
+    const input = {
       ...promptInput,
       ...(repairProblem && { repairProblem: sanitizePromptInput(repairProblem), repairActionType: sanitizePromptInput(repairActionType ?? "") }),
-    });
+    };
+    const rendered = meta.promptSource === "langfuse"
+      ? await renderPromptSource(ai, served.source, input)
+      : await ai.prompt("agent_decision", selected.variant ? { variant: selected.variant } : undefined).render(input);
     const response = await ai.generate({
       ...rendered,
       model: requestedModel,

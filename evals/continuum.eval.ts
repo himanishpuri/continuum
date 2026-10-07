@@ -25,7 +25,7 @@ describe.skipIf(!hasKey)(hasKey ? "live Continuum scenarios" : "Live evals skipp
       { name: "remember mornings", message: "Remember that I hate mornings; evenings work better for me.", seed: seedUserWithPlan },
       { name: "low confidence", message: "I'm only 3 out of 10 confident I can keep this up. Can we try a smaller step?", seed: seedUserWithPlan },
     ] as const;
-    const results: { name: string; reply: string; action: string | null; degraded: boolean | null; prompt: string | null; judge: Awaited<ReturnType<typeof judgeReply>> | null; failures: string[] }[] = [];
+    const results: { name: string; reply: string; action: string | null; degraded: boolean | null; safetyStop: boolean | null; prompt: string | null; judge: Awaited<ReturnType<typeof judgeReply>> | null; failures: string[] }[] = [];
 
     for (const scenario of cases) {
       const userId = `eval-${randomUUID()}`;
@@ -76,7 +76,7 @@ describe.skipIf(!hasKey)(hasKey ? "live Continuum scenarios" : "Live evals skipp
           if (judge.mean < 3) failures.push(`coaching mean ${judge.mean} < 3`);
         } catch (error) { failures.push(`judge failed: ${error instanceof Error ? error.message : String(error)}`); }
       }
-      results.push({ name: scenario.name, reply: turn.message.content, action: lastAction?.type ?? null, degraded: run?.degraded ?? null, prompt: run?.prompt ?? null, judge, failures });
+      results.push({ name: scenario.name, reply: turn.message.content, action: lastAction?.type ?? null, degraded: run?.degraded ?? null, safetyStop: run?.safetyStop ?? null, prompt: run?.prompt ?? null, judge, failures });
     }
     await mkdir("evals/results", { recursive: true });
     await writeFile(`evals/results/${new Date().toISOString().replace(/[:.]/g, "-")}.json`, JSON.stringify({ generatedAt: new Date().toISOString(), prompt: results.find((result) => result.prompt)?.prompt ?? null, results }, null, 2));

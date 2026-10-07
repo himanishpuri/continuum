@@ -6,6 +6,7 @@ import { approveAction } from "@/lib/tools/actionService";
 import { scheduleFollowupCheckin } from "@/lib/agent/followup";
 import { DemoAgentProvider } from "@/lib/agent/demoAgentProvider";
 import { seedStrugglingUser } from "@/tests/fixtures/seed";
+import { BEHAVIOR_MANIFEST } from "@/src/ai/behaviorManifest";
 
 function uid() {
   return `test-critical-${randomUUID()}`;
@@ -54,6 +55,7 @@ describe("critical agent scenario (§49)", () => {
     const repos = getRepositories();
     const action = (await repos.actions.list(userId)).at(-1);
     const run = await repos.agentRuns.get(userId, result.runId);
+    expect(run).toMatchObject({ provider: "demo", release: "local", guardrails: BEHAVIOR_MANIFEST.guardrails });
 
     expect(action).toMatchObject({ type: "CREATE_PLAN", status: "PENDING_APPROVAL" });
     expect(result.pendingApproval?.actionId).toBe(action?.id);

@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/auth/apiAuth";
 import { runDueCheckinsForUser } from "@/lib/background/runDueCheckins";
+import { flushLangfuse } from "@/src/ai/langfuse";
 
 /**
  * §23: local stand-in for the Vercel Cron production path, scoped to the
@@ -16,5 +17,6 @@ export async function POST() {
   if ("response" in auth) return auth.response;
 
   const results = await runDueCheckinsForUser(auth.user.uid);
+  after(() => flushLangfuse());
   return NextResponse.json({ results });
 }
