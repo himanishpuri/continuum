@@ -198,7 +198,9 @@ Every PR and main push runs lint, typecheck, and tests. Changes under `prompts/`
 
 ### Privacy
 
-Langfuse generations contain model, prompt ID, source, behavior hashes, release, latency, token counts, and outcome flags. They never include messages, model input/output text, or user ID. The Langfuse tracer uses an isolated OpenTelemetry provider, so Genkit's own tracing is not exported through it.
+Langfuse records one `handle-chat-turn` trace per user message and groups turns by conversation session ID. The root agent carries the user message and final reply. Its children record keyword safety, context retrieval (counts and IDs), intent, each model generation or demo rules decision, policy, action execution or approval parking, memory verification, and completion-claim checks. Background due check-ins use one `run-checkin` agent trace each, with rules, policy, and action children. Names and observation types stay stable for analysis; model generations include rendered prompt messages, decision JSON, served model, token usage, and the pinned Langfuse prompt link when applicable.
+
+The user ID is HMAC-SHA256 pseudonymized with `SESSION_SECRET` (fallback `continuum`) and truncated to 16 hex characters. The processor masks email addresses and phone numbers before export. A keyword or model-flagged urgent safety stop replaces root and every child input/output with `[redacted: safety stop]` before export; the generation retains model, usage, and non-content metadata. The processor uses `VERCEL_ENV` or `development`, while propagated attributes include the behavior release. Langfuse uses an isolated OpenTelemetry provider and async context propagation so Genkit tracing is not exported through it.
 
 ### Research basis
 

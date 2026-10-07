@@ -4,6 +4,7 @@ import { classifyIntent } from "@/src/ai/agent/planner";
 import { claimsCompletedChange, selectMemoriesToPersist } from "@/src/ai/agent/verifier";
 import { containsSafetyTrigger, SAFETY_RESPONSE } from "@/src/ai/agent/prompts";
 import { BEHAVIOR_MANIFEST } from "@/src/ai/behaviorManifest";
+import { traceTurn, traced, redactActiveTrace, SAFETY_REDACTION } from "@/src/ai/langfuse";
 import { findEvidence } from "@/lib/evidence/evidenceEngine";
 import { proposeAction } from "@/lib/tools/actionService";
 import { listPendingMemories, recordMemoryUsage } from "@/lib/memory/memoryService";
@@ -83,85 +84,56 @@ export async function sendAgentMessage(userId: string, message: string, conversa
     : await repos.conversations.create(userId, { title: message.slice(0, 60), createdAt: startedAt, updatedAt: startedAt });
   if (!conversation) throw new Error("Conversation not found.");
 
-  // Prior turns, captured before this message is appended, so the provider
-  // can reason with the full thread instead of the latest line in isolation.
-  const history = conversationId ? await repos.conversations.listMessages(userId, conversation.id) : [];
+  let safetyStop = false;
+  const processTurn = async (): Promise<AgentMessageResult> => {
 
-  await repos.conversations.addMessage(userId, conversation.id, {
-    role: "user",
-    content: message,
-    cards: [],
-    createdAt: startedAt,
-    metadata: {},
-  });
+    // Prior turns, captured before this message is appended, so the provider
+    // can reason with the full thread instead of the latest line in isolation.
+    const history = conversationId ? await repos.conversations.listMessages(userId, conversation.id) : [];
 
-  const provider = getAgentProvider();
-  const run = await repos.agentRuns.create(userId, {
-    conversationId: conversation.id,
-    trigger: "user_message",
-    input: message,
-    status: "running",
-    provider: provider.name,
-    release: BEHAVIOR_MANIFEST.release,
-    guardrails: BEHAVIOR_MANIFEST.guardrails,
-    steps: [],
-    planSummary: null,
-    actions: [],
-    resultSummary: "",
-    error: null,
-    startedAt,
-    completedAt: null,
-  });
-
-  await repos.events.create(userId, {
-    type: "AGENT_STARTED",
-    timestamp: startedAt,
-    source: "user",
-    payload: { runId: run.id, trigger: "user_message" },
-    summary: "Continuum started processing a new message.",
-  });
-
-  if (containsSafetyTrigger(message)) {
-    const steps: AgentRunStep[] = [{ label: "Detected a safety-sensitive message", completedAt: new Date().toISOString() }];
-    const agentMessage = await repos.conversations.addMessage(userId, conversation.id, {
-      role: "agent",
-      content: SAFETY_RESPONSE,
+    await repos.conversations.addMessage(userId, conversation.id, {
+      role: "user",
+      content: message,
       cards: [],
-      createdAt: new Date().toISOString(),
-      metadata: { runId: run.id },
+      createdAt: startedAt,
+      metadata: {},
     });
-    await repos.agentRuns.update(userId, run.id, {
-      status: "completed",
-      safetyStop: true,
-      steps,
-      resultSummary: SAFETY_RESPONSE,
-      completedAt: new Date().toISOString(),
+
+    const provider = getAgentProvider();
+    const run = await repos.agentRuns.create(userId, {
+      conversationId: conversation.id,
+      trigger: "user_message",
+      input: message,
+      status: "running",
+      provider: provider.name,
+      release: BEHAVIOR_MANIFEST.release,
+      guardrails: BEHAVIOR_MANIFEST.guardrails,
+      steps: [],
+      planSummary: null,
+      actions: [],
+      resultSummary: "",
+      error: null,
+      startedAt,
+      completedAt: null,
     });
+
     await repos.events.create(userId, {
-      type: "AGENT_COMPLETED",
-      timestamp: new Date().toISOString(),
-      source: "agent",
-      payload: { runId: run.id, safety: true, layer: "keyword" },
-      summary: "Responded with safety resources",
+      type: "AGENT_STARTED",
+      timestamp: startedAt,
+      source: "user",
+      payload: { runId: run.id, trigger: "user_message" },
+      summary: "Continuum started processing a new message.",
     });
-    return { conversationId: conversation.id, runId: run.id, message: agentMessage, pendingApproval: null, steps };
-  }
 
-  try {
-    const context = await buildAgentContext(userId);
-    const intent = classifyIntent(message);
-    const providerStartedAt = Date.now();
-    const turn = await provider.handleMessage({ userId, message, history, context, intent });
-    const latencyMs = turn.meta?.latencyMs ?? Date.now() - providerStartedAt;
-    const decision = turn.decision;
-
-    const steps: AgentRunStep[] = [
-      ...context.retrievedSteps.map((label) => ({ label, completedAt: new Date().toISOString() })),
-      ...turn.steps.map((label) => ({ label, completedAt: new Date().toISOString() })),
-    ];
-
-    if (decision.safetyConcern === "urgent") {
-      steps.push({ label: "Detected a safety-sensitive message", completedAt: new Date().toISOString() });
+    const keywordTriggered = await traced("check-safety-keywords", "guardrail", {}, async (observation) => {
+      const triggered = containsSafetyTrigger(message);
+      observation?.update({ output: { triggered } });
+      return triggered;
+    });
+    if (keywordTriggered) {
+      safetyStop = true;
+      redactActiveTrace();
+      const steps: AgentRunStep[] = [{ label: "Detected a safety-sensitive message", completedAt: new Date().toISOString() }];
       const agentMessage = await repos.conversations.addMessage(userId, conversation.id, {
         role: "agent",
         content: SAFETY_RESPONSE,
@@ -169,10 +141,171 @@ export async function sendAgentMessage(userId: string, message: string, conversa
         createdAt: new Date().toISOString(),
         metadata: { runId: run.id },
       });
-      await repos.conversations.update(userId, conversation.id, { updatedAt: new Date().toISOString() });
       await repos.agentRuns.update(userId, run.id, {
         status: "completed",
         safetyStop: true,
+        steps,
+        resultSummary: SAFETY_RESPONSE,
+        completedAt: new Date().toISOString(),
+      });
+      await repos.events.create(userId, {
+        type: "AGENT_COMPLETED",
+        timestamp: new Date().toISOString(),
+        source: "agent",
+        payload: { runId: run.id, safety: true, layer: "keyword" },
+        summary: "Responded with safety resources",
+      });
+      return { conversationId: conversation.id, runId: run.id, message: agentMessage, pendingApproval: null, steps };
+    }
+
+    try {
+      const context = await traced("build-context", "retriever", {}, async (observation) => {
+        const value = await buildAgentContext(userId);
+        observation?.update({ output: { memories: value.memories.length, evidenceIds: value.evidence.map((item) => item.id),
+          planId: value.plan?.id ?? null, pendingCheckins: value.pendingCheckins.length, selfReportConfidence: value.latestSelfReport?.confidence ?? null } });
+        return value;
+      });
+      const intent = await traced("classify-intent", "chain", {}, (observation) => {
+        const value = classifyIntent(message);
+        observation?.update({ output: value });
+        return value;
+      });
+      const providerStartedAt = Date.now();
+      const handle = () => provider.handleMessage({ userId, message, history, context, intent });
+      const turn = provider.name === "demo"
+        ? await traced("decide-rules", "chain", {}, async (observation) => {
+          const value = await handle();
+          observation?.update({ output: value.decision.safetyConcern === "urgent" ? SAFETY_REDACTION : value.decision });
+          return value;
+        })
+        : await handle();
+      const latencyMs = turn.meta?.latencyMs ?? Date.now() - providerStartedAt;
+      const decision = turn.decision;
+
+      const steps: AgentRunStep[] = [
+        ...context.retrievedSteps.map((label) => ({ label, completedAt: new Date().toISOString() })),
+        ...turn.steps.map((label) => ({ label, completedAt: new Date().toISOString() })),
+      ];
+
+      if (decision.safetyConcern === "urgent") {
+        safetyStop = true;
+        redactActiveTrace();
+        steps.push({ label: "Detected a safety-sensitive message", completedAt: new Date().toISOString() });
+        const agentMessage = await repos.conversations.addMessage(userId, conversation.id, {
+          role: "agent",
+          content: SAFETY_RESPONSE,
+          cards: [],
+          createdAt: new Date().toISOString(),
+          metadata: { runId: run.id },
+        });
+        await repos.conversations.update(userId, conversation.id, { updatedAt: new Date().toISOString() });
+        await repos.agentRuns.update(userId, run.id, {
+          status: "completed",
+          safetyStop: true,
+          ...(turn.meta && {
+            model: turn.meta.model,
+            ...(turn.meta.prompt && { prompt: turn.meta.prompt }),
+            ...(turn.meta.promptSource && { promptSource: turn.meta.promptSource }),
+            ...(turn.meta.tools && { tools: turn.meta.tools }),
+            ...(turn.meta.outputSchema && { outputSchema: turn.meta.outputSchema }),
+            usage: turn.meta.usage,
+            degraded: turn.meta.degraded,
+          }),
+          ...(turn.meta?.degraded && { error: turn.meta.error ?? "Model call degraded" }),
+          latencyMs,
+          intent: intent.intent,
+          confidence: decision.confidence,
+          steps,
+          resultSummary: SAFETY_RESPONSE,
+          completedAt: new Date().toISOString(),
+        });
+        await repos.events.create(userId, {
+          type: "AGENT_COMPLETED",
+          timestamp: new Date().toISOString(),
+          source: "agent",
+          payload: { runId: run.id, safety: true, layer: "model" },
+          summary: "Responded with safety resources",
+        });
+        return { conversationId: conversation.id, runId: run.id, message: agentMessage, pendingApproval: null, steps };
+      }
+
+      let actionRecord: AgentAction | null = null;
+      let denialReason: string | null = null;
+      if (decision.proposedAction) {
+        steps.push({ label: "Checked available actions", completedAt: new Date().toISOString() });
+        const outcome = await proposeAction(userId, {
+          proposal: decision.proposedAction,
+          evidenceIds: decision.evidenceIds,
+          permissions: context.user.settings.permissions,
+          autonomyLevel: context.user.settings.autonomyLevel,
+        });
+        if (!outcome.allowed) denialReason = outcome.reason;
+        else actionRecord = outcome.action;
+      }
+
+      let createdMemoryCount = actionRecord?.type === "CREATE_MEMORY" && actionRecord.status === "COMPLETED" ? 1 : 0;
+      const pendingMemories = await listPendingMemories(userId);
+      const memoriesToPersist = await traced("verify-memories", "guardrail", {}, (observation) => {
+        const kept = selectMemoriesToPersist(decision.memoryCandidates, [...context.memories, ...pendingMemories]);
+        observation?.update({ output: { proposed: decision.memoryCandidates.length, kept: kept.length } });
+        return kept;
+      });
+      for (const candidate of memoriesToPersist) {
+        const outcome = await proposeAction(userId, {
+          proposal: {
+            actionType: "CREATE_MEMORY",
+            parameters: {
+              type: candidate.type,
+              content: candidate.content,
+              confidence: candidate.confidence,
+              expiresInDays: candidate.expiresInDays,
+            },
+            reason: "Inferred from conversation.",
+            riskLevel: "low",
+            requiresApproval: false,
+          },
+          evidenceIds: decision.evidenceIds,
+          permissions: context.user.settings.permissions,
+          autonomyLevel: context.user.settings.autonomyLevel,
+        });
+        if (outcome.action?.status === "COMPLETED") createdMemoryCount++;
+      }
+      if (context.memories.length > 0) {
+        await recordMemoryUsage(userId, context.memories.map((m) => m.id));
+      }
+
+      steps.push({ label: decision.proposedAction ? "Recommendation ready" : "Response ready", completedAt: new Date().toISOString() });
+
+      const correctedClaim = await traced("check-completion-claim", "guardrail", {}, (observation) => {
+        const corrected = Boolean(actionRecord?.status === "PENDING_APPROVAL" && claimsCompletedChange(decision.summary));
+        observation?.update({ output: { corrected } });
+        return corrected;
+      });
+      const responseParts = [decision.summary];
+      if (correctedClaim) responseParts.push("Nothing has changed yet — approve it below to apply.");
+      if (denialReason) responseParts.push(`(I can't do this automatically: ${denialReason})`);
+      if (decision.clarifyingQuestion) responseParts.push(decision.clarifyingQuestion);
+      if (createdMemoryCount > 0) {
+        responseParts.push(`I noted ${createdMemoryCount} thing${createdMemoryCount > 1 ? "s" : ""} about you — you can confirm or dismiss ${createdMemoryCount > 1 ? "them" : "it"} on the Memory page.`);
+      }
+      const responseText = responseParts.join("\n\n");
+
+      const cards: ConversationMessageCard[] = [];
+      if (actionRecord && actionRecord.status === "PENDING_APPROVAL") cards.push(buildActionCard(actionRecord));
+      const evidence = findEvidence(context.evidence, decision.evidenceIds);
+      if (evidence.length > 0) cards.push({ kind: "evidence", data: { items: evidence } });
+
+      const agentMessage = await repos.conversations.addMessage(userId, conversation.id, {
+        role: "agent",
+        content: responseText,
+        cards,
+        createdAt: new Date().toISOString(),
+        metadata: { runId: run.id, evidenceIds: decision.evidenceIds },
+      });
+      await repos.conversations.update(userId, conversation.id, { updatedAt: new Date().toISOString() });
+
+      await repos.agentRuns.update(userId, run.id, {
+        status: "completed",
         ...(turn.meta && {
           model: turn.meta.model,
           ...(turn.meta.prompt && { prompt: turn.meta.prompt }),
@@ -186,155 +319,65 @@ export async function sendAgentMessage(userId: string, message: string, conversa
         latencyMs,
         intent: intent.intent,
         confidence: decision.confidence,
+        ...(correctedClaim && { correctedClaim: true }),
         steps,
-        resultSummary: SAFETY_RESPONSE,
+        planSummary: decision.proposedAction ? decision.summary : null,
+        actions: actionRecord ? [{ actionId: actionRecord.id, type: actionRecord.type, status: actionRecord.status }] : [],
+        resultSummary: responseText,
         completedAt: new Date().toISOString(),
       });
+
       await repos.events.create(userId, {
         type: "AGENT_COMPLETED",
         timestamp: new Date().toISOString(),
         source: "agent",
-        payload: { runId: run.id, safety: true, layer: "model" },
-        summary: "Responded with safety resources",
+        payload: { runId: run.id },
+        summary: "Continuum finished processing the message.",
       });
-      return { conversationId: conversation.id, runId: run.id, message: agentMessage, pendingApproval: null, steps };
-    }
 
-    let actionRecord: AgentAction | null = null;
-    let denialReason: string | null = null;
-    if (decision.proposedAction) {
-      steps.push({ label: "Checked available actions", completedAt: new Date().toISOString() });
-      const outcome = await proposeAction(userId, {
-        proposal: decision.proposedAction,
-        evidenceIds: decision.evidenceIds,
-        permissions: context.user.settings.permissions,
-        autonomyLevel: context.user.settings.autonomyLevel,
+      return {
+        conversationId: conversation.id,
+        runId: run.id,
+        message: agentMessage,
+        pendingApproval: actionRecord && actionRecord.status === "PENDING_APPROVAL" ? { actionId: actionRecord.id } : null,
+        steps,
+      };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      const fallbackText = "I couldn't complete that just now. Nothing was changed — please try again.";
+      const agentMessage = await repos.conversations.addMessage(userId, conversation.id, {
+        role: "agent",
+        content: fallbackText,
+        cards: [],
+        createdAt: new Date().toISOString(),
+        metadata: { runId: run.id },
       });
-      if (!outcome.allowed) denialReason = outcome.reason;
-      else actionRecord = outcome.action;
-    }
-
-    let createdMemoryCount = actionRecord?.type === "CREATE_MEMORY" && actionRecord.status === "COMPLETED" ? 1 : 0;
-    const pendingMemories = await listPendingMemories(userId);
-    const memoriesToPersist = selectMemoriesToPersist(decision.memoryCandidates, [...context.memories, ...pendingMemories]);
-    for (const candidate of memoriesToPersist) {
-      const outcome = await proposeAction(userId, {
-        proposal: {
-          actionType: "CREATE_MEMORY",
-          parameters: {
-            type: candidate.type,
-            content: candidate.content,
-            confidence: candidate.confidence,
-            expiresInDays: candidate.expiresInDays,
-          },
-          reason: "Inferred from conversation.",
-          riskLevel: "low",
-          requiresApproval: false,
-        },
-        evidenceIds: decision.evidenceIds,
-        permissions: context.user.settings.permissions,
-        autonomyLevel: context.user.settings.autonomyLevel,
+      await repos.agentRuns.update(userId, run.id, {
+        status: "failed",
+        latencyMs: Date.now() - new Date(startedAt).getTime(),
+        error: errorMessage,
+        resultSummary: fallbackText,
+        completedAt: new Date().toISOString(),
       });
-      if (outcome.action?.status === "COMPLETED") createdMemoryCount++;
+      await repos.events.create(userId, {
+        type: "AGENT_FAILED",
+        timestamp: new Date().toISOString(),
+        source: "agent",
+        payload: { runId: run.id, error: errorMessage },
+        summary: "Continuum failed to process the message.",
+      });
+      return {
+        conversationId: conversation.id,
+        runId: run.id,
+        message: agentMessage,
+        pendingApproval: null,
+        steps: [{ label: "Something went wrong", completedAt: new Date().toISOString() }],
+      };
     }
-    if (context.memories.length > 0) {
-      await recordMemoryUsage(userId, context.memories.map((m) => m.id));
-    }
-
-    steps.push({ label: decision.proposedAction ? "Recommendation ready" : "Response ready", completedAt: new Date().toISOString() });
-
-    const correctedClaim = actionRecord?.status === "PENDING_APPROVAL" && claimsCompletedChange(decision.summary);
-    const responseParts = [decision.summary];
-    if (correctedClaim) responseParts.push("Nothing has changed yet — approve it below to apply.");
-    if (denialReason) responseParts.push(`(I can't do this automatically: ${denialReason})`);
-    if (decision.clarifyingQuestion) responseParts.push(decision.clarifyingQuestion);
-    if (createdMemoryCount > 0) {
-      responseParts.push(`I noted ${createdMemoryCount} thing${createdMemoryCount > 1 ? "s" : ""} about you — you can confirm or dismiss ${createdMemoryCount > 1 ? "them" : "it"} on the Memory page.`);
-    }
-    const responseText = responseParts.join("\n\n");
-
-    const cards: ConversationMessageCard[] = [];
-    if (actionRecord && actionRecord.status === "PENDING_APPROVAL") cards.push(buildActionCard(actionRecord));
-    const evidence = findEvidence(context.evidence, decision.evidenceIds);
-    if (evidence.length > 0) cards.push({ kind: "evidence", data: { items: evidence } });
-
-    const agentMessage = await repos.conversations.addMessage(userId, conversation.id, {
-      role: "agent",
-      content: responseText,
-      cards,
-      createdAt: new Date().toISOString(),
-      metadata: { runId: run.id, evidenceIds: decision.evidenceIds },
-    });
-    await repos.conversations.update(userId, conversation.id, { updatedAt: new Date().toISOString() });
-
-    await repos.agentRuns.update(userId, run.id, {
-      status: "completed",
-      ...(turn.meta && {
-        model: turn.meta.model,
-        ...(turn.meta.prompt && { prompt: turn.meta.prompt }),
-        ...(turn.meta.promptSource && { promptSource: turn.meta.promptSource }),
-        ...(turn.meta.tools && { tools: turn.meta.tools }),
-        ...(turn.meta.outputSchema && { outputSchema: turn.meta.outputSchema }),
-        usage: turn.meta.usage,
-        degraded: turn.meta.degraded,
-      }),
-      ...(turn.meta?.degraded && { error: turn.meta.error ?? "Model call degraded" }),
-      latencyMs,
-      intent: intent.intent,
-      confidence: decision.confidence,
-      ...(correctedClaim && { correctedClaim: true }),
-      steps,
-      planSummary: decision.proposedAction ? decision.summary : null,
-      actions: actionRecord ? [{ actionId: actionRecord.id, type: actionRecord.type, status: actionRecord.status }] : [],
-      resultSummary: responseText,
-      completedAt: new Date().toISOString(),
-    });
-
-    await repos.events.create(userId, {
-      type: "AGENT_COMPLETED",
-      timestamp: new Date().toISOString(),
-      source: "agent",
-      payload: { runId: run.id },
-      summary: "Continuum finished processing the message.",
-    });
-
-    return {
-      conversationId: conversation.id,
-      runId: run.id,
-      message: agentMessage,
-      pendingApproval: actionRecord && actionRecord.status === "PENDING_APPROVAL" ? { actionId: actionRecord.id } : null,
-      steps,
-    };
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : "Unknown error";
-    const fallbackText = "I couldn't complete that just now. Nothing was changed — please try again.";
-    const agentMessage = await repos.conversations.addMessage(userId, conversation.id, {
-      role: "agent",
-      content: fallbackText,
-      cards: [],
-      createdAt: new Date().toISOString(),
-      metadata: { runId: run.id },
-    });
-    await repos.agentRuns.update(userId, run.id, {
-      status: "failed",
-      latencyMs: Date.now() - new Date(startedAt).getTime(),
-      error: errorMessage,
-      resultSummary: fallbackText,
-      completedAt: new Date().toISOString(),
-    });
-    await repos.events.create(userId, {
-      type: "AGENT_FAILED",
-      timestamp: new Date().toISOString(),
-      source: "agent",
-      payload: { runId: run.id, error: errorMessage },
-      summary: "Continuum failed to process the message.",
-    });
-    return {
-      conversationId: conversation.id,
-      runId: run.id,
-      message: agentMessage,
-      pendingApproval: null,
-      steps: [{ label: "Something went wrong", completedAt: new Date().toISOString() }],
-    };
-  }
+  };
+  return traceTurn("handle-chat-turn", userId, conversation.id, "chat", message, async (observation) => {
+    const result = await processTurn();
+    observation?.update({ output: safetyStop ? SAFETY_REDACTION : result.message.content });
+    return result;
+  });
 }

@@ -2,10 +2,11 @@ import type { ConversationMessage } from "@/lib/types";
 import { ai, fallback, getFallbackModels, getGeminiModel, retry } from "../genkit";
 import { AgentDecisionSchema, type AgentDecision, type IntentClassification } from "../schemas/agentSchemas";
 import { buildContextBlock, type AgentContext } from "./context";
+import { containsSafetyTrigger, SAFETY_RESPONSE } from "./prompts";
 import { promptInfo, renderPromptSource, sanitizePromptInput, selectAgentPrompt } from "../promptVersion";
 import { BEHAVIOR_MANIFEST } from "../behaviorManifest";
 import { isPinned } from "../promptPins";
-import { fetchLabeledPrompt, recordDecision } from "../langfuse";
+import { fetchLabeledPrompt, traced, SAFETY_REDACTION } from "../langfuse";
 import { describeToolCatalog, findToolByActionType } from "../tools/registry";
 
 export interface DecisionRequest {
@@ -37,6 +38,12 @@ function renderHistory(history: ConversationMessage[]): string {
   if (recent.length === 0) return "CONVERSATION SO FAR: (this is the first message)";
   const lines = recent.map((m) => `${m.role === "user" ? "User" : "Continuum"}: ${m.content}`);
   return ["CONVERSATION SO FAR:", ...lines].join("\n");
+}
+
+/** Trace-only copy of history: user turns that hit a safety stop never leave the app. */
+function redactCrisisTurns(history: ConversationMessage[]): ConversationMessage[] {
+  return history.map((m, i) => m.role === "user" && (containsSafetyTrigger(m.content) || history[i + 1]?.content === SAFETY_RESPONSE)
+    ? { ...m, content: SAFETY_REDACTION } : m);
 }
 
 function fallbackDecision(clarifyingQuestion: string): AgentDecision {
@@ -106,10 +113,6 @@ export async function decide(request: DecisionRequest): Promise<{ decision: Agen
   };
   const finish = (decision: AgentDecision) => {
     meta.latencyMs = Date.now() - startedAt;
-    try {
-      recordDecision({ ...meta, guardrails: BEHAVIOR_MANIFEST.guardrails, release: BEHAVIOR_MANIFEST.release,
-        safetyConcern: decision.safetyConcern, intent: decision.intent }, meta.promptSource === "langfuse" ? langfusePrompt?.client : undefined);
-    } catch (error) { console.warn("Langfuse trace failed", error); }
     return { decision, meta };
   };
   const rounds = clarificationRounds(request.history);
@@ -132,11 +135,44 @@ export async function decide(request: DecisionRequest): Promise<{ decision: Agen
     const rendered = meta.promptSource === "langfuse"
       ? await renderPromptSource(ai, served.source, input)
       : await ai.prompt("agent_decision", selected.variant ? { variant: selected.variant } : undefined).render(input);
-    const response = await ai.generate({
-      ...rendered,
-      model: requestedModel,
-      output: { schema: AgentDecisionSchema },
-      use: generationMiddleware,
+    const traceHistory = sanitizePromptInput(renderHistory(redactCrisisTurns(request.history)));
+    const messages = (rendered.messages ?? []).map((m) => ({ role: m.role === "model" ? "assistant" : m.role,
+      content: m.content.map((part) => part.text ?? "").join("").replace(promptInput.history, () => traceHistory) }));
+    const response = await traced("generate-decision", "generation", {
+      input: messages,
+      model: requestedModel.name,
+      ...(meta.promptSource === "langfuse" && langfusePrompt?.client && { prompt: langfusePrompt.client }),
+      metadata: { attempt: repairProblem ? "repair" : "initial", ...(repairProblem && { repairProblem }), prompt: meta.prompt,
+        promptSource: meta.promptSource, tools: meta.tools, outputSchema: meta.outputSchema, guardrails: BEHAVIOR_MANIFEST.guardrails,
+        release: BEHAVIOR_MANIFEST.release, degraded: false, repaired: Boolean(repairProblem), intent: request.intent.intent },
+    }, async (observation) => {
+      try {
+        const result = await ai.generate({
+          ...rendered,
+          model: requestedModel,
+          output: { schema: AgentDecisionSchema },
+          use: generationMiddleware,
+        });
+        const servedModel = (result.custom as { modelVersion?: unknown } | undefined)?.modelVersion;
+        // Aliases like gemini-flash-lite-latest resolve to concrete ids, so any served id other than the requested one is a fallback.
+        const fellBack = typeof servedModel === "string" && requestedModel.name.split("/").at(-1) !== servedModel;
+        observation?.update({
+          model: typeof servedModel === "string" ? servedModel : requestedModel.name,
+          usageDetails: { input: result.usage?.inputTokens ?? 0, output: result.usage?.outputTokens ?? 0 },
+          input: result.output?.safetyConcern === "urgent" ? SAFETY_REDACTION : messages,
+          output: result.output?.safetyConcern === "urgent" ? SAFETY_REDACTION : result.output,
+          metadata: { attempt: repairProblem ? "repair" : "initial", ...(repairProblem && { repairProblem }), prompt: meta.prompt,
+            promptSource: meta.promptSource, tools: meta.tools, outputSchema: meta.outputSchema, guardrails: BEHAVIOR_MANIFEST.guardrails,
+            release: BEHAVIOR_MANIFEST.release, degraded: !result.output, repaired: Boolean(repairProblem),
+            safetyConcern: result.output?.safetyConcern ?? "none", intent: result.output?.intent ?? request.intent.intent,
+            confidence: result.output?.confidence ?? 0, fallback: fellBack },
+          ...((!result.output || fellBack) && { level: fellBack && result.output ? "WARNING" as const : "ERROR" as const, statusMessage: fellBack ? "Fallback model used" : "Model returned no output" }),
+        });
+        return result;
+      } catch (error) {
+        observation?.update({ level: "ERROR", statusMessage: "Model call failed", metadata: { attempt: repairProblem ? "repair" : "initial", degraded: true } });
+        throw error;
+      }
     });
     meta.usage.inputTokens += response.usage?.inputTokens ?? 0;
     meta.usage.outputTokens += response.usage?.outputTokens ?? 0;

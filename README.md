@@ -163,7 +163,7 @@ var to an empty string to disable fallback.
 
 ### Prompt versions
 
-The Gemini decision prompt lives in `prompts/agent_decision.prompt`. Each model-backed Agent Run records its `name@version#hash8` prompt id. `PROMPT_VARIANT=name[:pct]` selects a bundled variant for all or a sticky percentage of users. Prompt edits require a version bump, a new full hash in `src/ai/promptPins.ts`, and `npm run eval`. Compare reports with `npm run eval:compare -- a.json b.json`. `npm run prompts:publish` sends pinned sources to Langfuse staging; `npm run prompts:promote -- <name> <langfuseVersion>` moves production. Runtime accepts only pinned Langfuse source and falls back to bundled text. Langfuse traces contain metadata and usage only, without user text or IDs.
+The Gemini decision prompt lives in `prompts/agent_decision.prompt`. Each model-backed Agent Run records its `name@version#hash8` prompt id. `PROMPT_VARIANT=name[:pct]` selects a bundled variant for all or a sticky percentage of users. Prompt edits require a version bump, a new full hash in `src/ai/promptPins.ts`, and `npm run eval`. Compare reports with `npm run eval:compare -- a.json b.json`. `npm run prompts:publish` sends pinned sources to Langfuse staging; `npm run prompts:promote -- <name> <langfuseVersion>` moves production. Runtime accepts only pinned Langfuse source and falls back to bundled text. Langfuse traces include chat content and rendered model prompts, mask emails and phone numbers, pseudonymize user IDs, and redact all content for safety stops. Each chat turn is grouped under its conversation session.
 
 | Variable | Purpose |
 | --- | --- |

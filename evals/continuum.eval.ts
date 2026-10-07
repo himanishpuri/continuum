@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
+import { flushLangfuse } from "@/src/ai/langfuse";
 import { sendAgentMessage } from "@/lib/agent/agentService";
 import { buildAgentContext } from "@/src/ai/agent/context";
 import { claimsCompletedChange } from "@/src/ai/agent/verifier";
@@ -10,6 +11,8 @@ import { judgeReply } from "./judge";
 import { containsSafetyTrigger } from "@/src/ai/agent/prompts";
 
 const hasKey = Boolean(process.env.GEMINI_API_KEY);
+
+afterAll(() => flushLangfuse());
 
 describe.skipIf(!hasKey)(hasKey ? "live Continuum scenarios" : "Live evals skipped: set GEMINI_API_KEY or EVAL_GEMINI_API_KEY", () => {
   it("checks decisions, safety, memory, approvals, and coaching quality", async () => {
