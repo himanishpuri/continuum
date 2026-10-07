@@ -1,4 +1,6 @@
 import { getRepositories } from "@/lib/repositories";
+import { BEHAVIOR_MANIFEST } from "@/src/ai/behaviorManifest";
+import { traceTurn, traced } from "@/src/ai/langfuse";
 import { computeProgressSnapshot } from "@/lib/progress/progressEngine";
 import { buildEvidence } from "@/lib/evidence/evidenceEngine";
 import { proposeAction } from "@/lib/tools/actionService";
@@ -66,97 +68,106 @@ async function evaluateCheckin(
   evidenceIds: string[],
   user: UserRecord
 ): Promise<CheckinRunResult> {
-  const repos = getRepositories();
-  const now = new Date();
+  return traceTurn("run-checkin", userId, undefined, "background-checkin", checkin.message, async (observation) => {
+    const repos = getRepositories();
+    const now = new Date();
 
-  // Severity is adherence vs. the schedule (completed / scheduled plan-days),
-  // not the display rate (completed / logged), so this stays stable.
-  const weeklyAdherence = progress.weeklyPlanned > 0 ? progress.weeklyCompleted / progress.weeklyPlanned : 1;
-  const severelyOff = Boolean(plan) && progress.weeklyPlanned >= 3 && weeklyAdherence < 0.4;
-  const mildDip = Boolean(plan) && !severelyOff && weeklyAdherence < 0.7;
-
-  let message: string;
-  let outcome: CheckinRunResult["outcome"];
-  const steps = ["Found a due check-in", "Reviewed recent progress"];
-
-  if (severelyOff && plan) {
-    outcome = "clarification_requested";
-    message = `You've completed ${progress.weeklyCompleted} of your last ${progress.weeklyPlanned} planned sessions. Is your current schedule (${plan.durationMinutes} min, ${plan.frequencyLabel}) still realistic? I can shorten it or move it to a different time if that would help.`;
-    steps.push("Adherence has dropped significantly — following up again soon");
-    await proposeAction(userId, {
-      proposal: {
-        actionType: "SCHEDULE_CHECKIN",
-        parameters: {
-          scheduledAt: new Date(now.getTime() + 1000 * 60 * 60 * 24 * 3).toISOString(),
-          message: "Following up on whether your schedule still feels realistic.",
-          planId: plan.id,
-        },
-        reason: "Adherence has fallen significantly; following up again soon.",
-        riskLevel: "low",
-        requiresApproval: false,
-      },
-      evidenceIds,
-      permissions: user.settings.permissions,
-      autonomyLevel: user.settings.autonomyLevel,
+    // Severity is adherence vs. the schedule (completed / scheduled plan-days),
+    // not the display rate (completed / logged), so this stays stable.
+    const { severelyOff, mildDip } = await traced("decide-rules", "chain", {}, (step) => {
+      const weeklyAdherence = progress.weeklyPlanned > 0 ? progress.weeklyCompleted / progress.weeklyPlanned : 1;
+      const severelyOff = Boolean(plan) && progress.weeklyPlanned >= 3 && weeklyAdherence < 0.4;
+      const mildDip = Boolean(plan) && !severelyOff && weeklyAdherence < 0.7;
+      step?.update({ output: { severelyOff, mildDip, weeklyAdherence } });
+      return { severelyOff, mildDip };
     });
-  } else if (mildDip) {
-    outcome = "no_action_needed";
-    message = `You've done ${progress.weeklyCompleted} of ${progress.weeklyPlanned} scheduled sessions this week. A little behind, but nothing that needs a plan change — keep going.`;
-    steps.push("Adherence dipped slightly but remains within a normal range");
-  } else {
-    outcome = "no_action_needed";
-    message = plan
-      ? `You've done ${progress.weeklyCompleted} of ${progress.weeklyPlanned} scheduled sessions this week. Adherence looks strong — no changes needed.`
-      : "No active plan to check in on yet.";
-    steps.push("Adherence remains strong");
-  }
 
-  const completedCheckin = await repos.checkins.update(userId, checkin.id, {
-    status: "completed",
-    completedAt: now.toISOString(),
-    response: message,
-  });
+    let message: string;
+    let outcome: CheckinRunResult["outcome"];
+    const steps = ["Found a due check-in", "Reviewed recent progress"];
 
-  // §51: this is the user's opted-in reminder, not an agent SEND_EXTERNAL_MESSAGE action.
-  if (user.preferences.reminderEnabled) {
-    try {
-      const sent = await getNotificationService().send({
-        userId, channel: "push", title: "Continuum check-in", message, url: "/dashboard#checkin",
+    if (severelyOff && plan) {
+      outcome = "clarification_requested";
+      message = `You've completed ${progress.weeklyCompleted} of your last ${progress.weeklyPlanned} planned sessions. Is your current schedule (${plan.durationMinutes} min, ${plan.frequencyLabel}) still realistic? I can shorten it or move it to a different time if that would help.`;
+      steps.push("Adherence has dropped significantly — following up again soon");
+      await proposeAction(userId, {
+        proposal: {
+          actionType: "SCHEDULE_CHECKIN",
+          parameters: {
+            scheduledAt: new Date(now.getTime() + 1000 * 60 * 60 * 24 * 3).toISOString(),
+            message: "Following up on whether your schedule still feels realistic.",
+            planId: plan.id,
+          },
+          reason: "Adherence has fallen significantly; following up again soon.",
+          riskLevel: "low",
+          requiresApproval: false,
+        },
+        evidenceIds,
+        permissions: user.settings.permissions,
+        autonomyLevel: user.settings.autonomyLevel,
       });
-      if (sent.delivered) {
-        await repos.events.create(userId, {
-          type: "MESSAGE_SENT", timestamp: now.toISOString(), source: "background",
-          payload: { checkinId: completedCheckin.id, notificationId: sent.id },
-          summary: "Sent your check-in reminder.",
-        });
-      }
-    } catch (error) {
-      console.error("Check-in notification failed", userId, error);
+    } else if (mildDip) {
+      outcome = "no_action_needed";
+      message = `You've done ${progress.weeklyCompleted} of ${progress.weeklyPlanned} scheduled sessions this week. A little behind, but nothing that needs a plan change — keep going.`;
+      steps.push("Adherence dipped slightly but remains within a normal range");
+    } else {
+      outcome = "no_action_needed";
+      message = plan
+        ? `You've done ${progress.weeklyCompleted} of ${progress.weeklyPlanned} scheduled sessions this week. Adherence looks strong — no changes needed.`
+        : "No active plan to check in on yet.";
+      steps.push("Adherence remains strong");
     }
-  }
 
-  await repos.events.create(userId, {
-    type: "CHECKIN_COMPLETED",
-    timestamp: now.toISOString(),
-    source: "background",
-    payload: { checkinId: completedCheckin.id, outcome },
-    summary: outcome === "no_action_needed" ? "Agent checked progress — no intervention needed." : "Agent detected an adherence issue during a scheduled check-in.",
+    const completedCheckin = await repos.checkins.update(userId, checkin.id, {
+      status: "completed",
+      completedAt: now.toISOString(),
+      response: message,
+    });
+
+    // §51: this is the user's opted-in reminder, not an agent SEND_EXTERNAL_MESSAGE action.
+    if (user.preferences.reminderEnabled) {
+      try {
+        const sent = await getNotificationService().send({
+          userId, channel: "push", title: "Continuum check-in", message, url: "/dashboard#checkin",
+        });
+        if (sent.delivered) {
+          await repos.events.create(userId, {
+            type: "MESSAGE_SENT", timestamp: now.toISOString(), source: "background",
+            payload: { checkinId: completedCheckin.id, notificationId: sent.id },
+            summary: "Sent your check-in reminder.",
+          });
+        }
+      } catch (error) {
+        console.error("Check-in notification failed", userId, error);
+      }
+    }
+
+    await repos.events.create(userId, {
+      type: "CHECKIN_COMPLETED",
+      timestamp: now.toISOString(),
+      source: "background",
+      payload: { checkinId: completedCheckin.id, outcome },
+      summary: outcome === "no_action_needed" ? "Agent checked progress — no intervention needed." : "Agent detected an adherence issue during a scheduled check-in.",
+    });
+
+    await repos.agentRuns.create(userId, {
+      conversationId: "background",
+      trigger: "background_checkin",
+      input: checkin.message,
+      status: "completed",
+      provider: "rules", // Deterministic evaluator; no model is called.
+      release: BEHAVIOR_MANIFEST.release,
+      guardrails: BEHAVIOR_MANIFEST.guardrails,
+      steps: steps.map((label) => ({ label, completedAt: now.toISOString() })),
+      planSummary: null,
+      actions: [],
+      resultSummary: message,
+      error: null,
+      startedAt: now.toISOString(),
+      completedAt: now.toISOString(),
+    });
+
+    observation?.update({ output: { checkinId: completedCheckin.id, outcome, message } });
+    return { userId, checkinId: completedCheckin.id, outcome, message };
   });
-
-  await repos.agentRuns.create(userId, {
-    conversationId: "background",
-    trigger: "background_checkin",
-    input: checkin.message,
-    status: "completed",
-    provider: "rules", // Deterministic evaluator; no model is called.
-    steps: steps.map((label) => ({ label, completedAt: now.toISOString() })),
-    planSummary: null,
-    actions: [],
-    resultSummary: message,
-    error: null,
-    startedAt: now.toISOString(),
-    completedAt: now.toISOString(),
-  });
-
-  return { userId, checkinId: completedCheckin.id, outcome, message };
 }

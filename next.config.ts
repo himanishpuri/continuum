@@ -9,6 +9,7 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  outputFileTracingIncludes: { "/*": ["./prompts/**/*"] },
   async headers() {
     return [
       { source: "/:path*", headers: SECURITY_HEADERS },

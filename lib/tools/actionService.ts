@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getRepositories } from "@/lib/repositories";
 import { evaluatePolicy } from "@/lib/policy/policyEngine";
+import { traced } from "@/src/ai/langfuse";
 import { executeAction } from "./toolExecutor";
 import type { ActionProposal } from "@/src/ai/schemas/actionSchemas";
 import type { AgentAction, AgentPermissions, AutonomyLevel } from "@/lib/types";
@@ -30,10 +31,14 @@ const ACTION_EXPIRY_MS = 1000 * 60 * 60 * 24 * 3; // 3 days
  * later via approveAction/rejectAction.
  */
 export async function proposeAction(userId: string, input: ProposeActionInput): Promise<ProposeActionOutcome> {
-  const agentDecision = evaluatePolicy({
-    actionType: input.proposal.actionType,
-    permissions: input.permissions,
-    autonomyLevel: input.autonomyLevel,
+  const agentDecision = await traced("evaluate-policy", "guardrail", { input: { actionType: input.proposal.actionType } }, (observation) => {
+    const value = evaluatePolicy({
+      actionType: input.proposal.actionType,
+      permissions: input.permissions,
+      autonomyLevel: input.autonomyLevel,
+    });
+    observation?.update({ output: { allowed: value.allowed, requiresApproval: value.requiresApproval, reason: value.reason } });
+    return value;
   });
   // §71: an explicit user action is already consented to; agent permissions do not govern it.
   const decision = input.initiatedBy === "user" && input.proposal.actionType !== "HIGH_RISK_HEALTH_ACTION"
@@ -73,6 +78,7 @@ export async function proposeAction(userId: string, input: ProposeActionInput): 
   });
 
   if (decision.requiresApproval) {
+    await traced("park-for-approval", "event", { input: { actionType: action.type }, output: { status: action.status } }, () => undefined);
     await repos.events.create(userId, {
       type: action.type === "CREATE_PLAN" || action.type === "MODIFY_PLAN" ? "PLAN_PROPOSED" : "APPROVAL_REQUESTED",
       timestamp: now,
@@ -81,7 +87,11 @@ export async function proposeAction(userId: string, input: ProposeActionInput): 
       summary: `Continuum proposed: ${input.proposal.reason}`,
     });
   } else {
-    action = await executeAction(userId, action.id);
+    action = await traced("execute-action", "tool", { input: { actionType: action.type, params: action.parameters } }, async (observation) => {
+      const executed = await executeAction(userId, action.id);
+      observation?.update({ output: { result: executed.result, status: executed.status } });
+      return executed;
+    });
   }
 
   return { allowed: true, reason: decision.reason, action };

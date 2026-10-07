@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { runDueCheckinsForAllUsers } from "@/lib/background/runDueCheckins";
 import { timingSafeEqualStr } from "@/lib/util/timingSafeEqual";
+import { flushLangfuse } from "@/src/ai/langfuse";
 
 /**
  * §23: Vercel Cron calls GET with `Authorization: Bearer <CRON_SECRET>`
@@ -19,5 +20,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
   const results = await runDueCheckinsForAllUsers();
+  after(() => flushLangfuse());
   return NextResponse.json({ results, count: results.length });
 }

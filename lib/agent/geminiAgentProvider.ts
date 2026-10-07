@@ -6,7 +6,7 @@ export class GeminiAgentProvider implements AgentProvider {
   readonly name = "gemini" as const;
 
   async handleMessage(input: AgentTurnInput): Promise<AgentTurnResult> {
-    const { decision, meta } = await decide({ message: input.message, history: input.history, context: input.context, intent: input.intent });
+    const { decision, meta } = await decide({ userId: input.userId, message: input.message, history: input.history, context: input.context, intent: input.intent });
     return {
       decision,
       meta,

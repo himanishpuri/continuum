@@ -166,6 +166,46 @@ confidence rating (0–10) plus an optional note. The latest self-report
 enters the next agent context; a low rating can bias the demo agent toward
 a smaller step when completion-rate evidence is borderline.
 
+## Prompt versioning
+
+Model-facing decision text lives in `prompts/agent_decision.prompt` and optional `agent_decision.<variant>.prompt` files. The resolved source SHA-256 and frontmatter version form `agent_decision@version#hash8[+variant]`, stored on model-backed Agent Runs, including degraded turns. Golden tests compare rendered messages. User-derived fields have every run of three or more `<` collapsed before rendering, preventing `<<<dotprompt:role:…>>>` role injection. Next.js traces `prompts/**/*` into server output.
+
+### Version vs variant (A/B)
+
+`version` identifies a reviewed source revision. A variant is a separate prompt file and experiment arm. `PROMPT_VARIANT=name` sends all users to that file; `PROMPT_VARIANT=name:50` sends a sticky 50% bucket, computed from the first eight SHA-256 hex digits of the user ID modulo 100. `:0` selects the baseline. Missing variants fall back to baseline. The Activity page groups runs by prompt ID and reports approvals, safety stops, degradation, median latency, and tokens per turn.
+
+### Deployment labels
+
+Git files and `src/ai/promptPins.ts` are the source of truth. `npm run prompts:publish` checks full hashes and creates changed versions with the Langfuse `staging` label. `npm run prompts:promote -- <name> <langfuseVersion>` moves `production` to a pinned version. Runtime reads `PROMPT_LABEL` (default `production`), but serves Langfuse text only when its full hash is pinned; retrieval errors, timeouts, and unpinned text use the bundled file. A/B variants remain bundled. Promoting an older pinned version rolls back the label without changing Git.
+
+```mermaid
+flowchart LR
+  Git[Git prompt + pinned hash] --> Staging[Langfuse staging]
+  Staging --> Eval[Live eval and report comparison]
+  Eval --> Production[Langfuse production label]
+  Production --> Allowlist[Runtime hash allowlist]
+  Allowlist --> Render[Genkit render]
+  Git -->|fallback| Render
+```
+
+### Behaviour manifest
+
+Each run stores the release commit prefix and guardrail hash. Model turns also store hashes of the rendered tool catalog and decision output JSON schema, plus prompt source. This makes tool, schema, guardrail, and deployment changes visible alongside prompt changes.
+
+### CI gate
+
+Every PR and main push runs lint, typecheck, and tests. Changes under `prompts/`, `src/ai/`, `evals/`, or `lib/agent/` trigger live evals when `EVAL_GEMINI_API_KEY` is configured; reports are uploaded as artifacts. Main publishes pinned prompts to staging after checks. Production promotion is a manual workflow. For a prompt change, bump frontmatter `version`, add its full hash to `src/ai/promptPins.ts`, run `npm run eval`, then compare reports with `npm run eval:compare -- a.json b.json`.
+
+### Privacy
+
+Langfuse records one `handle-chat-turn` trace per user message and groups turns by conversation session ID. The root agent carries the user message and final reply. Its children record keyword safety, context retrieval (counts and IDs), intent, each model generation or demo rules decision, policy, action execution or approval parking, memory verification, and completion-claim checks. Background due check-ins use one `run-checkin` agent trace each, with rules, policy, and action children. Names and observation types stay stable for analysis; model generations include rendered prompt messages, decision JSON, served model, token usage, and the pinned Langfuse prompt link when applicable.
+
+The user ID is HMAC-SHA256 pseudonymized with `SESSION_SECRET` (fallback `continuum`) and truncated to 16 hex characters. The processor masks email addresses and phone numbers before export. A keyword or model-flagged urgent safety stop replaces root and every child input/output with `[redacted: safety stop]` before export; the generation retains model, usage, and non-content metadata. The processor uses `VERCEL_ENV` or `development`, while propagated attributes include the behavior release. Langfuse uses an isolated OpenTelemetry provider and async context propagation so Genkit tracing is not exported through it.
+
+### Research basis
+
+The workflow follows work on [prompt evolution in repositories](https://arxiv.org/abs/2412.17298), [prompts as software artifacts](https://arxiv.org/abs/2509.17548), [regression testing evolving APIs](https://arxiv.org/abs/2311.11123), [tool description sensitivity](https://arxiv.org/abs/2505.18135), and [model behavior drift](https://arxiv.org/abs/2307.09009). Implementation references: [Langfuse prompt version control](https://langfuse.com/docs/prompt-management/features/prompt-version-control) and [Genkit Dotprompt](https://genkit.dev/docs/js/dotprompt).
+
 ## 6. Request sequence — a chat message end to end
 
 ```mermaid

@@ -187,6 +187,12 @@ export interface AgentRun {
   status: AgentRunStatus;
   provider: "gemini" | "demo" | "rules";
   model?: string;
+  prompt?: string;
+  promptSource?: "bundled" | "langfuse";
+  release?: string;
+  guardrails?: string;
+  tools?: string;
+  outputSchema?: string;
   latencyMs?: number;
   usage?: { inputTokens: number; outputTokens: number };
   degraded?: boolean;

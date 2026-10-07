@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "genkit";
 import { requireApiUser } from "@/lib/auth/apiAuth";
 import { sendAgentMessage } from "@/lib/agent/agentService";
 import { checkRateLimit } from "@/lib/util/rateLimit";
+import { flushLangfuse } from "@/src/ai/langfuse";
 
 const BodySchema = z.object({
   message: z.string().min(1).max(4000),
@@ -25,6 +26,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await sendAgentMessage(auth.user.uid, parsed.data.message, parsed.data.conversationId);
+    after(() => flushLangfuse());
     return NextResponse.json(result);
   } catch (err) {
     console.error("Agent message failed", err);
