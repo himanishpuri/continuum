@@ -166,6 +166,12 @@ confidence rating (0–10) plus an optional note. The latest self-report
 enters the next agent context; a low rating can bias the demo agent toward
 a smaller step when completion-rate evidence is borderline.
 
+## Prompt versioning
+
+Model-facing decision text lives in `prompts/agent_decision.prompt` (or `agent_decision.<variant>.prompt`). `PROMPT_VARIANT` selects an existing variant and falls back to the baseline with a warning if missing. The resolved file's SHA-256 and frontmatter version form `agent_decision@version#hash8[+variant]`, stored as `AgentRun.prompt` on model-backed turns, including degraded ones. The pin test checks full file hashes, and golden tests check rendered system and user messages against the previous implementation. User-derived fields have every run of three or more `<` collapsed before rendering, so they can never form a `<<<dotprompt:role:…>>>` marker (role injection). Next.js traces `prompts/**/*` into server output for deployment.
+
+To change a prompt: edit the `.prompt` file, bump `version`, pin its new full hash in `tests/unit/promptVersioning.test.ts`, run `npm run eval`, and compare report prompt ids and outcomes.
+
 ## 6. Request sequence — a chat message end to end
 
 ```mermaid

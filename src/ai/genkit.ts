@@ -2,6 +2,7 @@ import "server-only";
 import { genkit } from "genkit";
 import { googleAI } from "@genkit-ai/google-genai";
 import { fallback, retry } from "@genkit-ai/middleware";
+import { AgentDecisionSchema } from "./schemas/agentSchemas";
 
 /**
  * Genkit instance for the real (non-demo) agent path. Only imported by
@@ -14,8 +15,10 @@ import { fallback, retry } from "@genkit-ai/middleware";
  * src/ai/agent/decisionEngine.ts.
  */
 export const ai = genkit({
+  promptDir: "prompts",
   plugins: [googleAI(), retry.plugin(), fallback.plugin()],
 });
+ai.defineSchema("AgentDecision", AgentDecisionSchema);
 
 export { fallback, retry };
 

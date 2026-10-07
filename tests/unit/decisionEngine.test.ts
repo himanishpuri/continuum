@@ -6,7 +6,7 @@ const generate = vi.hoisted(() => vi.fn());
 const mockState = vi.hoisted(() => ({ generateThrows: false }));
 
 vi.mock("@/src/ai/genkit", () => ({
-  ai: { generate: (...args: unknown[]) => {
+  ai: { prompt: () => ({ render: async () => ({ messages: [] }) }), generate: (...args: unknown[]) => {
     if (mockState.generateThrows) throw new Error("model unavailable");
     return generate(...args);
   } },
@@ -60,6 +60,7 @@ describe("decide telemetry", () => {
     expect(result.decision).toEqual(decision);
     expect(result.meta).toMatchObject({
       model: "gemini-served",
+      prompt: expect.stringMatching(/^agent_decision@1#[a-f0-9]{8}$/),
       usage: { inputTokens: 12, outputTokens: 5 },
       repaired: false,
       degraded: false,

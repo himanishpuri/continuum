@@ -140,6 +140,7 @@ endpoint — the seed data includes an already-due check-in.)
    DEMO_MODE=false
    GEMINI_API_KEY=your-key
    GEMINI_MODEL=gemini-3.5-flash   # a concrete, currently-served model id
+   PROMPT_VARIANT=                 # optional agent_decision.<variant>.prompt
    ```
 3. `GeminiAgentProvider` (backed by Genkit + `@genkit-ai/google-genai`)
    activates automatically — see `src/ai/genkit.ts` and
@@ -155,6 +156,10 @@ transient 503/429s are retried with backoff, and if `GEMINI_MODEL` keeps
 failing or has been retired (404) it falls back to
 `GEMINI_FALLBACK_MODELS` (default `gemini-flash-lite-latest`). Set that
 var to an empty string to disable fallback.
+
+### Prompt versions
+
+The Gemini decision prompt lives in `prompts/agent_decision.prompt`. Each model-backed Agent Run records its `name@version#hash8` prompt id. Set `PROMPT_VARIANT` to use an existing `agent_decision.<variant>.prompt`; an unknown variant falls back to the baseline with a warning. Prompt edits require a version bump, a new hash in `tests/unit/promptVersioning.test.ts`, and `npm run eval` to compare reports.
 
 ## Enabling Firebase
 

@@ -172,6 +172,7 @@ export async function sendAgentMessage(userId: string, message: string, conversa
         safetyStop: true,
         ...(turn.meta && {
           model: turn.meta.model,
+          ...(turn.meta.prompt && { prompt: turn.meta.prompt }),
           usage: turn.meta.usage,
           degraded: turn.meta.degraded,
         }),
@@ -264,6 +265,7 @@ export async function sendAgentMessage(userId: string, message: string, conversa
       status: "completed",
       ...(turn.meta && {
         model: turn.meta.model,
+        ...(turn.meta.prompt && { prompt: turn.meta.prompt }),
         usage: turn.meta.usage,
         degraded: turn.meta.degraded,
       }),

@@ -10,6 +10,7 @@ export interface AgentMetrics {
   tokensPerTurn: number | null;
   confidenceTrend: { latest: number | null; change: number | null; ratings: number[] };
   postInterventionAdherence: { eventId: string; beforeRate: number | null; afterRate: number | null; change: number | null }[];
+  byPrompt: { prompt: string; runs: number; safetyStops: number; degradedRate: number | null; approvalRate: number | null }[];
 }
 
 function rate(numerator: number, denominator: number): number | null {
@@ -45,6 +46,24 @@ export function computeAgentMetrics(
     const afterRate = after.length ? computeProgressSnapshot(after, plan, new Date(afterEnd)).completionRate : null;
     return { eventId: event.id, beforeRate, afterRate, change: beforeRate === null || afterRate === null ? null : afterRate - beforeRate };
   });
+  const promptRuns = new Map<string, AgentRun[]>();
+  for (const run of runs) {
+    if (!run.prompt) continue;
+    const group = promptRuns.get(run.prompt) ?? [];
+    group.push(run);
+    promptRuns.set(run.prompt, group);
+  }
+  const byPrompt = [...promptRuns].map(([prompt, group]) => {
+    const actionIds = new Set(group.flatMap((run) => run.actions.map((action) => action.actionId)));
+    const promptDecided = decided.filter((action) => actionIds.has(action.id));
+    return {
+      prompt,
+      runs: group.length,
+      safetyStops: group.filter((run) => run.safetyStop).length,
+      degradedRate: rate(group.filter((run) => run.degraded).length, group.length),
+      approvalRate: rate(promptDecided.filter((action) => action.status !== "REJECTED").length, promptDecided.length),
+    };
+  }).sort((a, b) => b.runs - a.runs || a.prompt.localeCompare(b.prompt));
   return {
     approvalRate: rate(approved, decided.length),
     rejectionRate: rate(decided.length - approved, decided.length),
@@ -54,5 +73,6 @@ export function computeAgentMetrics(
     tokensPerTurn: measured.length ? measured.reduce((total, run) => total + (run.usage!.inputTokens + run.usage!.outputTokens), 0) / measured.length : null,
     confidenceTrend: { latest: ratings.at(-1) ?? null, change: ratings.length > 1 ? ratings.at(-1)! - ratings[0] : null, ratings },
     postInterventionAdherence: interventions,
+    byPrompt,
   };
 }

@@ -25,6 +25,7 @@ describe("safety keyword detection", () => {
     "I died laughing",
     "I want to diet better",
     "My chest pains have improved",
+    "Honestly I don't see the point of carrying on anymore.",
   ])("does not detect %s", (message) => {
     expect(containsSafetyTrigger(message)).toBe(false);
   });

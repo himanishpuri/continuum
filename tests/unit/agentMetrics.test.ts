@@ -5,10 +5,10 @@ import type { AgentAction, AgentRun, CheckIn, EventRecord } from "@/lib/types";
 describe("agent metrics", () => {
   it("computes approval, run, confidence, and 14-day intervention outcomes", () => {
     const runs = [
-      { latencyMs: 100, usage: { inputTokens: 20, outputTokens: 10 }, degraded: false, safetyStop: false },
-      { latencyMs: 300, usage: { inputTokens: 40, outputTokens: 10 }, degraded: true, safetyStop: true },
+      { latencyMs: 100, usage: { inputTokens: 20, outputTokens: 10 }, degraded: false, safetyStop: false, prompt: "agent_decision@1#aaaa0000", actions: [{ actionId: "approved" }] },
+      { latencyMs: 300, usage: { inputTokens: 40, outputTokens: 10 }, degraded: true, safetyStop: true, prompt: "agent_decision@1#bbbb0000", actions: [{ actionId: "rejected" }] },
     ] as AgentRun[];
-    const actions = [{ status: "COMPLETED", approvalRequired: true }, { status: "REJECTED", approvalRequired: true }] as AgentAction[];
+    const actions = [{ id: "approved", status: "COMPLETED", approvalRequired: true }, { id: "rejected", status: "REJECTED", approvalRequired: true }] as AgentAction[];
     const event = (id: string, type: EventRecord["type"], timestamp: string): EventRecord => ({
       id, userId: "u", type, timestamp, source: "user", payload: {}, summary: "",
     });
@@ -27,5 +27,9 @@ describe("agent metrics", () => {
     expect(metrics).toMatchObject({ approvalRate: 0.5, rejectionRate: 0.5, degradedRate: 0.5, safetyStops: 1, p50LatencyMs: 200, tokensPerTurn: 40 });
     expect(metrics.confidenceTrend).toMatchObject({ latest: 7, change: 3 });
     expect(metrics.postInterventionAdherence[0]).toMatchObject({ beforeRate: 0.5, afterRate: 1, change: 0.5 });
+    expect(metrics.byPrompt).toEqual([
+      { prompt: "agent_decision@1#aaaa0000", runs: 1, safetyStops: 0, degradedRate: 0, approvalRate: 1 },
+      { prompt: "agent_decision@1#bbbb0000", runs: 1, safetyStops: 1, degradedRate: 1, approvalRate: 0 },
+    ]);
   });
 });

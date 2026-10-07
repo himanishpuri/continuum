@@ -60,6 +60,15 @@ export default function ActivityPage() {
               : <>Last plan change, 14-day completion: {formatRate(metricsQuery.data.metrics.postInterventionAdherence.at(-1)!.beforeRate)} before → {formatRate(metricsQuery.data.metrics.postInterventionAdherence.at(-1)!.afterRate)} after</>}
           </p>}
         </div>}
+        {metricsQuery.data && metricsQuery.data.metrics.byPrompt.length > 0 && <div className="mt-4 overflow-x-auto text-sm text-slate-600 dark:text-slate-400">
+          <h3 className="mb-2 font-medium text-slate-900 dark:text-slate-100">By prompt version</h3>
+          <table className="w-full text-left">
+            <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="py-1 pr-3">Prompt</th><th className="py-1 pr-3">Runs</th><th className="py-1 pr-3">Safety stops</th><th className="py-1 pr-3">Degraded</th><th className="py-1">Approvals</th></tr></thead>
+            <tbody>{metricsQuery.data.metrics.byPrompt.map((item) => <tr key={item.prompt} className="border-b border-slate-100 dark:border-slate-800">
+              <td className="py-1 pr-3 font-mono text-xs">{item.prompt}</td><td className="py-1 pr-3">{item.runs}</td><td className="py-1 pr-3">{item.safetyStops}</td><td className="py-1 pr-3">{formatRate(item.degradedRate)}</td><td className="py-1">{formatRate(item.approvalRate)}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
       </Card>
 
       <div className="flex gap-2" role="tablist" aria-label="Filter activity">
